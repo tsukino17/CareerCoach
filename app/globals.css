@@ -1,0 +1,77 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Healing Warm Palette (Day Mode default) */
+    --background: 40 33% 98%; /* #fdfcf8 Warm Off-white */
+    --foreground: 240 4% 25%; /* #3d3d40 Soft Charcoal */
+    
+    --primary: 13 65% 72%; /* #e89e89 Muted Coral */
+    --primary-foreground: 0 0% 100%;
+    
+    --secondary: 170 25% 87%; /* #d6e5e3 Soft Sage */
+    --secondary-foreground: 170 40% 25%;
+
+    --muted: 40 20% 94%; /* #f4f1ea Warm Beige */
+    --muted-foreground: 25 5% 45%;
+    
+    --card: 0 0% 100%;
+    --card-foreground: 240 4% 25%;
+    
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 4% 25%;
+
+    --border: 40 10% 90%;
+    --input: 40 10% 90%;
+    
+    --radius: 1rem; /* Softer, rounder corners */
+  }
+
+  /* Gentle Breathing Animation */
+  @keyframes breathe {
+    0%, 100% { transform: scale(1); opacity: 0.5; }
+    50% { transform: scale(1.05); opacity: 0.8; }
+  }
+
+  /* Floating Animation */
+  @keyframes float {
+    0% { transform: translateY(0px); }
+    50% { transform: translateY(-10px); }
+    100% { transform: translateY(0px); }
+  }
+
+  .animate-breathe {
+    animation: breathe 4s ease-in-out infinite;
+  }
+  
+  .animate-float {
+    animation: float 6s ease-in-out infinite;
+  }
+  
+  /* Glassmorphism Utilities */
+  .glass {
+    @apply bg-white/40 backdrop-blur-md border border-white/50 shadow-sm;
+  }
+  
+  .glass-card {
+    @apply bg-white/70 backdrop-blur-xl border border-white/60 shadow-lg;
+  }
+  
+  body {
+    @apply bg-background text-foreground selection:bg-primary/20;
+    background-image: 
+      radial-gradient(at 0% 0%, hsla(13, 65%, 92%, 1) 0px, transparent 50%),
+      radial-gradient(at 100% 0%, hsla(170, 45%, 90%, 1) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, hsla(40, 50%, 93%, 1) 0px, transparent 50%),
+      radial-gradient(at 0% 100%, hsla(280, 20%, 95%, 1) 0px, transparent 50%);
+    background-attachment: fixed;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
