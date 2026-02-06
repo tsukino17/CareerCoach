@@ -1,26 +1,26 @@
-# CareerCoach (The Deep Mirror)
+# 职业教练 CareerCoach (Deep Mirror)
 
-## Version 3.1.0 - Deep Path (v3.1 deep-path)
+## 版本 3.1.0 - 深度路径 (v3.1 deep-path)
 
-This version introduces a refined "Deep Path" analysis flow, enhancing the user experience from conversation to career report generation.
+此版本引入了优化的“深度路径”分析流程，提升了从对话到生成职业报告的用户体验。
 
-### Key Features
+### 核心特性
 
-1.  **Deep Analysis Flow (Chat -> Report)**
-    - Streamlined transition from the chat interface to the report generation page.
-    - Ensures a continuous and immersive analysis experience.
+1.  **深度分析流程 (对话 -> 报告)**
+    - 简化了从聊天界面到报告生成页面的过渡。
+    - 确保连续且沉浸式的分析体验。
 
-2.  **Immersive Loading Experience**
-    - New `GenerationLoading` component with a 12-second full-screen progress animation.
-    - Provides real-time status feedback to reduce user anxiety during report generation.
+2.  **沉浸式加载体验**
+    - 新增 `GenerationLoading` 组件，提供 12 秒的全屏进度动画。
+    - 提供实时状态反馈，缓解用户在报告生成期间的等待焦虑。
 
-3.  **Visual & Interaction Polish**
-    - **Smart Typography**: Automatic injection of "breathing space" (half-width space) around Chinese double quotes (e.g., `文本 “引用” 文本`) for better readability.
-    - **Strict Punctuation**: Enforced use of standard Chinese punctuation (，。、：) and double quotes (“”) across all AI-generated content.
-    - **Clean UI**: Removed redundant `ReportCard` popup for a cleaner interface.
+3.  **视觉与交互打磨**
+    - **智能排版**：自动在中文双引号周围注入“呼吸感”（半角空格）（例如：`文本 “引用” 文本`），以提高可读性。
+    - **严格标点**：强制在所有 AI 生成的内容中使用标准中文标点（，。、：）和双引号（“”）。
+    - **界面整洁**：移除了冗余的 `ReportCard` 弹窗，界面更加清爽。
 
-### Tech Stack
-- **Framework**: Next.js 15 (App Router)
-- **Styling**: Tailwind CSS
-- **AI Integration**: Alibaba DashScope (Qwen-Plus) via Vercel AI SDK
-- **Language**: TypeScript
+### 技术栈
+- **框架**: Next.js 15 (App Router)
+- **样式**: Tailwind CSS
+- **AI 集成**: 阿里云 DashScope (Qwen-Plus) 通过 Vercel AI SDK
+- **语言**: TypeScript
