@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
+export const dynamic = 'force-static';
+
 export default function Home() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center p-6 text-center relative overflow-hidden">

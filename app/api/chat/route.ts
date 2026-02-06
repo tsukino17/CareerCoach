@@ -5,6 +5,7 @@ import { GEM_POLISHER_V2_CHAT_PROMPT } from '@/lib/prompt-versions';
 
 export const runtime = 'edge';
 export const maxDuration = 30;
+export const preferredRegion = ['hkg1', 'sin1', 'iad1']; // Prioritize Asia regions if available on plan
 
 export async function POST(req: Request) {
   try {
