@@ -3,6 +3,7 @@ import { streamText, tool } from 'ai';
 import { z } from 'zod';
 import { GEM_POLISHER_V2_CHAT_PROMPT } from '@/lib/prompt-versions';
 
+export const runtime = 'edge';
 export const maxDuration = 30;
 
 export async function POST(req: Request) {
@@ -36,12 +37,18 @@ export async function POST(req: Request) {
       
       Keep the tone empathetic but action-oriented.
       
+      **STYLE GUIDELINES**:
+      - Speak like a professional coach: Clear, Direct, Grounded.
+      - AVOID flowery, poetic, or overly dramatic language.
+      - AVOID excessive use of em dashes (——) and interjections like "Ah" (啊).
+      
       IMPORTANT: Communicate in Simplified Chinese (简体中文).
       `;
     } else {
       systemPrompt += `
       **Tools**:
       - You have access to a "getSalaryInsight" tool. If the user asks about salary trends or market rates for a specific role and city, USE THIS TOOL to get data, then incorporate the findings into your empathetic response. Do not make up numbers if you can use the tool.
+      - You have access to a "enableReportButton" tool. Call this tool simultaneously when you ask the user if they want to generate the report.
       
       Start by welcoming them if it's the start (though the UI handles the welcome message usually, be ready to continue).
       `;
@@ -52,6 +59,15 @@ export async function POST(req: Request) {
       system: systemPrompt,
       messages,
       tools: {
+        enableReportButton: tool({
+            description: 'Call this tool when you have gathered enough information about the user (Preferences, Willingness, Capabilities, Talents, Inclinations) and you have just asked the user if they want to see the report.',
+            parameters: z.object({
+              reason: z.string().describe('The reason why you think the profile is complete.'),
+            }),
+            execute: async ({ reason }) => {
+              return JSON.stringify({ status: 'enabled', reason });
+            },
+        }),
         getSalaryInsight: tool({
           description: 'Get salary range insights for a specific job role in a city. Returns estimated monthly salary in RMB.',
           parameters: z.object({
