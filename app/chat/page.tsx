@@ -215,7 +215,7 @@ export default function ChatPage() {
       <header className="flex items-center justify-between px-6 py-4 border-b border-white/20 bg-white/40 backdrop-blur-md z-10 sticky top-0">
         <div className="flex flex-col">
             <h1 className="text-lg font-medium tracking-tight text-foreground/80">深度镜像 (Deep Mirror)</h1>
-            <span className="text-[10px] text-muted-foreground tracking-widest uppercase opacity-70">v2.0 Gem Polisher</span>
+            <span className="text-[10px] text-muted-foreground tracking-widest uppercase opacity-70">v3.1.0 Deep Path</span>
         </div>
         <div className="flex items-center gap-2">
             <Button
