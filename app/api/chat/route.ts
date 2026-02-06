@@ -36,6 +36,11 @@ export async function POST(req: Request) {
       
       Keep the tone empathetic but action-oriented.
       
+      **STYLE GUIDELINES**:
+      - Speak like a professional coach: Clear, Direct, Grounded.
+      - AVOID flowery, poetic, or overly dramatic language.
+      - AVOID excessive use of em dashes (——) and interjections like "Ah" (啊).
+      
       IMPORTANT: Communicate in Simplified Chinese (简体中文).
       `;
     } else {
