@@ -202,6 +202,8 @@ export default function ChatPage() {
       <div className="absolute top-[-10%] left-[-10%] w-64 h-64 bg-primary/20 rounded-full blur-3xl animate-float opacity-60 pointer-events-none" />
       <div className="absolute bottom-[20%] right-[-5%] w-48 h-48 bg-secondary/30 rounded-full blur-3xl animate-breathe opacity-60 pointer-events-none" style={{ animationDelay: '2s' }} />
       
+      {isGeneratingReport && <GenerationLoading currentStep={loadingStep} />}
+
       {showPlan && planData && (
         <PlanCard
           data={planData}
