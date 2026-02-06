@@ -3,6 +3,7 @@ import { generateObject } from 'ai';
 import { z } from 'zod';
 import { sanitizeResponseContent } from '@/lib/utils';
 
+export const runtime = 'edge';
 export const maxDuration = 60;
 
 const roleAnalysisSchema = z.object({
