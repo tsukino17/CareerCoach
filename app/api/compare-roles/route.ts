@@ -5,7 +5,6 @@ import { sanitizeResponseContent } from '@/lib/utils';
 import { GEM_POLISHER_V2_REPORT_PROMPT } from '@/lib/prompt-versions';
 
 export const runtime = 'edge';
-export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 const roleComparisonSchema = z.object({

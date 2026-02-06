@@ -3,7 +3,6 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { generateText } from 'ai';
 
 export const runtime = 'edge';
-export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
 export async function POST(req: Request) {
