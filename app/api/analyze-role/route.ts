@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { sanitizeResponseContent } from '@/lib/utils';
 
 export const runtime = 'edge';
+// Ensure Edge Runtime is applied
 export const maxDuration = 60;
 
 const roleAnalysisSchema = z.object({
