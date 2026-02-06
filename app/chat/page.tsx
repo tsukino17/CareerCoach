@@ -2,10 +2,9 @@
 
 import { useChat } from 'ai/react';
 import { useRef, useEffect, useState } from 'react';
-import { Send, FileText, Loader2, Trash2, Calendar } from 'lucide-react';
+import { Send, FileText, Loader2, Trash2, Calendar, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { ReportCard } from '@/components/report-card';
 import { PlanCard } from '@/components/plan-card';
 import { MessageRenderer } from '@/components/message-renderer';
 import { useRouter } from 'next/navigation';
@@ -13,6 +12,54 @@ import { useRouter } from 'next/navigation';
 const STORAGE_KEY = 'career_chat_history_v1';
 const PLAN_STORAGE_KEY = 'career_plan_v1';
 const REPORT_STORAGE_KEY = 'career_report_v1';
+
+function GenerationLoading({ currentStep }: { currentStep: string }) {
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    // We expect the process to take about 10-15 seconds based on the steps
+    const duration = 12000; 
+    const interval = 100;
+    const steps = duration / interval;
+    const increment = 98 / steps; // Target 98%
+
+    const timer = setInterval(() => {
+      setProgress(prev => {
+        if (prev >= 98) return prev;
+        return prev + increment;
+      });
+    }, interval);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-white/90 backdrop-blur-md animate-in fade-in duration-500">
+      <div className="relative w-24 h-24 mb-8">
+        <div className="absolute inset-0 rounded-full border-[6px] border-slate-100"></div>
+        <div className="absolute inset-0 rounded-full border-[6px] border-primary border-t-transparent animate-spin duration-[2s]"></div>
+        <Sparkles className="absolute inset-0 m-auto w-10 h-10 text-primary animate-pulse" />
+      </div>
+      
+      <div className="w-full max-w-sm space-y-4 px-8 text-center">
+        <h3 className="text-xl font-bold text-foreground/80 tracking-tight animate-pulse">
+          {currentStep || '正在生成报告...'}
+        </h3>
+        
+        <div className="h-2.5 w-full bg-slate-100 rounded-full overflow-hidden shadow-inner border border-slate-200/50">
+          <div 
+            className="h-full bg-gradient-to-r from-blue-400 to-primary transition-all duration-200 ease-out rounded-full shadow-[0_0_10px_rgba(59,130,246,0.5)]"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+        <div className="flex justify-between items-center text-xs text-muted-foreground font-medium px-1">
+            <span>AI 分析中</span>
+            <span className="tabular-nums">{Math.round(progress)}%</span>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function ChatPage() {
   const [planData, setPlanData] = useState(null);
@@ -39,10 +86,7 @@ export default function ChatPage() {
   const [showReportButton, setShowReportButton] = useState(false);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [loadingStep, setLoadingStep] = useState<string>('');
-  const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
-  const [reportData, setReportData] = useState(null);
   const [showPlan, setShowPlan] = useState(false);
-  const [planError, setPlanError] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
 
   // Load history and plan on mount
@@ -137,46 +181,18 @@ export default function ChatPage() {
       setLoadingStep('准备就绪！');
       
       const data = await response.json();
-      setReportData(data);
       try {
         window.localStorage.setItem(REPORT_STORAGE_KEY, JSON.stringify(data));
       } catch (e) {
         console.error('Failed to persist report', e);
       }
       router.push('/report');
+      // Note: We keep isGeneratingReport true to show the overlay during transition
     } catch (error) {
       clearInterval(intervalId);
       console.error('Failed to generate report:', error);
-    } finally {
       setIsGeneratingReport(false);
-      setLoadingStep('');
-    }
-  };
-
-  const handleGeneratePlan = async () => {
-    if (!reportData) return;
-    setPlanError(null);
-    setIsGeneratingPlan(true);
-    try {
-      const response = await fetch('/api/plan', {
-        method: 'POST',
-        body: JSON.stringify({ 
-          report: reportData,
-          messages: messages 
-        }),
-      });
-      if (!response.ok) {
-        throw new Error('Failed to generate plan');
-      }
-      const data = await response.json();
-      setPlanData(data);
-      setReportData(null); // Close report card
-      setShowPlan(true); // Open plan card
-    } catch (error) {
-      console.error('Failed to generate plan:', error);
-      setPlanError('转型行动计划生成失败，可以稍后重试，或在对话中多分享一些你的现状和目标。');
-    } finally {
-      setIsGeneratingPlan(false);
+      // Optional: Show toast or error UI
     }
   };
 
@@ -185,16 +201,6 @@ export default function ChatPage() {
       {/* Healing Background Elements */}
       <div className="absolute top-[-10%] left-[-10%] w-64 h-64 bg-primary/20 rounded-full blur-3xl animate-float opacity-60 pointer-events-none" />
       <div className="absolute bottom-[20%] right-[-5%] w-48 h-48 bg-secondary/30 rounded-full blur-3xl animate-breathe opacity-60 pointer-events-none" style={{ animationDelay: '2s' }} />
-      
-      {reportData && (
-        <ReportCard 
-          data={reportData} 
-          onClose={() => setReportData(null)} 
-          onGeneratePlan={handleGeneratePlan}
-          isGeneratingPlan={isGeneratingPlan}
-          planError={planError}
-        />
-      )}
       
       {showPlan && planData && (
         <PlanCard

@@ -239,6 +239,70 @@ interface RoleAnalysis {
   selection_advice: string;
 }
 
+function LoadingState({ type = 'single' }: { type?: 'single' | 'comparison' }) {
+  const [progress, setProgress] = useState(0);
+  const [messageIndex, setMessageIndex] = useState(0);
+
+  const messages = type === 'single' ? [
+    "正在检索行业数据...",
+    "正在分析岗位核心职责...",
+    "正在匹配您的核心优势...",
+    "正在生成典型工作场景...",
+    "正在整理薪资与发展前景..."
+  ] : [
+    "正在对比两个职位的核心差异...",
+    "正在评估薪资与发展潜力...",
+    "正在分析优劣势匹配度...",
+    "正在生成最终建议..."
+  ];
+
+  useEffect(() => {
+    const duration = 20000; // 20 seconds total expected wait
+    const interval = 100;
+    const steps = duration / interval;
+    const increment = 100 / steps;
+
+    const timer = setInterval(() => {
+      setProgress(prev => {
+        if (prev >= 95) return prev; // Stall at 95% until done
+        return prev + increment;
+      });
+    }, interval);
+
+    const messageTimer = setInterval(() => {
+      setMessageIndex(prev => (prev + 1) % messages.length);
+    }, 3000); // Change message every 3 seconds
+
+    return () => {
+      clearInterval(timer);
+      clearInterval(messageTimer);
+    };
+  }, [messages.length]);
+
+  return (
+    <div className="h-full flex flex-col items-center justify-center space-y-6 p-8">
+      <div className="relative w-16 h-16">
+        <div className="absolute inset-0 rounded-full border-4 border-slate-100"></div>
+        <div className="absolute inset-0 rounded-full border-4 border-primary border-t-transparent animate-spin"></div>
+        <Sparkles className="absolute inset-0 m-auto w-6 h-6 text-primary animate-pulse" />
+      </div>
+      
+      <div className="w-full max-w-xs space-y-2 text-center">
+        <p className="text-sm font-medium text-foreground/80 animate-pulse">
+          {messages[messageIndex]}
+        </p>
+        <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+          <div 
+            className="h-full bg-primary transition-all duration-300 ease-out"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+        <p className="text-xs text-muted-foreground pt-1">{Math.round(progress)}%</p>
+      </div>
+    </div>
+  );
+}
+
 export default function ReportPage() {
   const router = useRouter();
   const [report, setReport] = useState<ReportData | null>(null);
@@ -415,7 +479,7 @@ export default function ReportPage() {
         </section>
 
         <section className="grid md:grid-cols-12 gap-6">
-          <Card className="md:col-span-8 glass-card border-white/60 bg-white/80 shadow-sm hover:shadow-md transition-all duration-500">
+          <Card className="order-2 md:order-1 md:col-span-8 glass-card border-white/60 bg-white/80 shadow-sm hover:shadow-md transition-all duration-500">
             <CardHeader className="p-6 pb-3 border-b border-black/5">
               <div className="flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-emerald-600" />
@@ -493,7 +557,7 @@ export default function ReportPage() {
             </CardContent>
           </Card>
 
-          <Card className="md:col-span-4 glass-card border-white/60 bg-white/80 shadow-sm hover:shadow-md transition-all duration-500 h-fit">
+          <Card className="order-1 md:order-2 md:col-span-4 glass-card border-white/60 bg-white/80 shadow-sm hover:shadow-md transition-all duration-500 h-fit">
             <CardHeader className="p-6 pb-3 border-b border-black/5">
               <div className="flex items-center gap-2">
                 <Target className="w-4 h-4 text-cyan-600" />
@@ -603,10 +667,7 @@ export default function ReportPage() {
             
             <div className="flex-1 overflow-y-auto p-6">
               {!roleAnalysis ? (
-                <div className="h-full flex flex-col items-center justify-center space-y-4 text-muted-foreground">
-                  <Loader2 className="w-8 h-8 animate-spin text-primary" />
-                  <p>正在深度分析该职业...</p>
-                </div>
+                <LoadingState type="single" />
               ) : (
                 <div className="space-y-8 animate-in fade-in duration-500 pb-10">
                   <div className="space-y-4">
@@ -769,10 +830,7 @@ export default function ReportPage() {
               </div>
 
               {!comparisonData ? (
-                <div className="flex flex-col items-center justify-center py-20 space-y-4">
-                  <Loader2 className="w-10 h-10 animate-spin text-primary" />
-                  <p className="text-muted-foreground animate-pulse">正在进行深度对比分析...</p>
-                </div>
+                <LoadingState type="comparison" />
               ) : (
                 <div className="space-y-8">
                   {/* Summary */}

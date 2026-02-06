@@ -1,17 +1,18 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { generateObject } from 'ai';
 import { z } from 'zod';
+import { sanitizeResponseContent } from '@/lib/utils';
 
 export const maxDuration = 60;
 
 const roleAnalysisSchema = z.object({
-  responsibilities: z.array(z.string()).describe('List of 3-4 key responsibilities. Be practical and grounded.'),
-  daily_routine: z.string().describe('Description of a typical day. MUST be concise, bulleted points within 3 sections (上午/下午/晚上). Concrete execution of responsibilities.'),
-  why_fit: z.string().describe('Why this fits the user'),
+  responsibilities: z.array(z.string()).describe('List of 3-4 key responsibilities. Be practical and grounded. Use Chinese double quotes for emphasis.'),
+  daily_routine: z.string().describe('Description of a typical day. MUST be concise, bulleted points within 3 sections (上午/下午/晚上). Concrete execution of responsibilities. Use Chinese double quotes.'),
+  why_fit: z.string().describe('Why this fits the user. Use Chinese double quotes.'),
   salary_range: z.string().describe('Estimated salary range in China (e.g. 15k-25k)'),
   industries_companies: z.array(z.string()).describe('List of suitable industries or representative companies'),
-  core_competencies: z.array(z.string()).describe('List of 3-5 specific hard/soft skills (e.g., specific tools, methodologies)'),
-  selection_advice: z.string().describe('Brief advice to help user decide if this is right for them')
+  core_competencies: z.array(z.string()).describe('List of 3-5 specific hard/soft skills (e.g., specific tools, methodologies). Use Chinese double quotes.'),
+  selection_advice: z.string().describe('Brief advice to help user decide if this is right for them. Use Chinese double quotes for emphasis.')
 });
 
 export async function POST(req: Request) {
@@ -46,7 +47,7 @@ export async function POST(req: Request) {
             - **Format**: "上午：Task 1, Task 2" (No bullet points inside the line, just text).
             - **Content Focus**: Focus on key actions and outcomes. Minimize tool mentions.
     3. **Formatting & Punctuation**: 
-       - **STRICTLY FORBIDDEN**: Single quotes ('').
+       - **STRICTLY FORBIDDEN**: Single quotes (''). 
        - **REQUIRED**: Chinese double quotes (“”) for any emphasis or terminology.
        - **REQUIRED**: Use proper Chinese punctuation (，。、：) throughout.
     `;
@@ -61,7 +62,9 @@ export async function POST(req: Request) {
       mode: 'json',
     });
 
-    return new Response(JSON.stringify(object), {
+    const sanitizedObject = sanitizeResponseContent(object);
+
+    return new Response(JSON.stringify(sanitizedObject), {
       headers: { 'Content-Type': 'application/json' },
     });
   } catch (error) {

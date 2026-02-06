@@ -1,6 +1,7 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { generateObject } from 'ai';
 import { z } from 'zod';
+import { sanitizeResponseContent } from '@/lib/utils';
 
 export const maxDuration = 60;
 
@@ -56,7 +57,7 @@ export async function POST(req: Request) {
     - If they are a "Creator", focus on shipping. If "Analyst", focus on research/data.
     - Include specific "check-in" points where they should chat with you (the AI) for feedback.
     - **Punctuation**: Use proper Chinese punctuation (，。、：).
-    - **Quotes**: STRICTLY use Chinese double quotes (“”) for any quoted text. Do NOT use single quotes.
+    - **Quotes**: STRICTLY FORBIDDEN to use single quotes (''). MUST use Chinese double quotes (“”) for any quoted text or emphasis.
     `;
 
     const { object } = await generateObject({
@@ -70,7 +71,9 @@ export async function POST(req: Request) {
       mode: 'json',
     });
 
-    return new Response(JSON.stringify(object), {
+    const sanitizedObject = sanitizeResponseContent(object);
+
+    return new Response(JSON.stringify(sanitizedObject), {
       headers: { 'Content-Type': 'application/json' },
     });
   } catch (error: any) {

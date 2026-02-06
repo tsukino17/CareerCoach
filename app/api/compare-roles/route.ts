@@ -1,6 +1,7 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { generateObject } from 'ai';
 import { z } from 'zod';
+import { sanitizeResponseContent } from '@/lib/utils';
 import { GEM_POLISHER_V2_REPORT_PROMPT } from '@/lib/prompt-versions';
 
 export const maxDuration = 60;
@@ -54,8 +55,9 @@ export async function POST(req: Request) {
        - **Encouraging**: Highlight the positive aspects of both roles to inspire the user.
        - **Kind**: Present challenges as "constructive considerations" rather than negatives.
     3. **Formatting & Punctuation**: 
-       - **Strictly use Chinese double quotes (“”)** for emphasis. NEVER use single quotes.
-       - **Use proper Chinese punctuation (，。、：)** throughout.
+       - **STRICTLY FORBIDDEN**: Single quotes ('').
+       - **REQUIRED**: Use Chinese double quotes (“”) for any emphasis.
+       - **REQUIRED**: Use proper Chinese punctuation (，。、：) throughout.
     
     Output structured JSON.`;
 
@@ -69,7 +71,9 @@ export async function POST(req: Request) {
       mode: 'json',
     });
 
-    return new Response(JSON.stringify(object), {
+    const sanitizedObject = sanitizeResponseContent(object);
+
+    return new Response(JSON.stringify(sanitizedObject), {
       headers: { 'Content-Type': 'application/json' },
     });
   } catch (error: any) {
