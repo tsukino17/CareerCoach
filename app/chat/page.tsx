@@ -157,7 +157,7 @@ export default function ChatPage() {
       {
         id: 'welcome',
         role: 'assistant',
-        content: "你好。我是这里的倾听者，也是你的职业镜像。我想通过对话，帮你发现你可能忽略的职业优势。今天你的职业状态感觉如何？",
+        content: "你好。我是这里的倾听者，也是你的天赋挖掘者。我想通过对话，帮你发现你可能忽略的职业优势。今天你的职业状态感觉如何？",
       }
     ],
     onFinish: handleFinish,
@@ -317,7 +317,7 @@ export default function ChatPage() {
         {
           id: 'welcome',
           role: 'assistant',
-          content: "你好。我是这里的倾听者，也是你的职业镜像。我想通过对话，帮你发现你可能忽略的职业优势。今天你的职业状态感觉如何？",
+          content: "你好。我是这里的倾听者，也是你的天赋挖掘者。我想通过对话，帮你发现你可能忽略的职业优势。今天你的职业状态感觉如何？",
         }
       ]);
       // Close user center
@@ -325,7 +325,7 @@ export default function ChatPage() {
   };
 
   return (
-    <div className="flex h-[100dvh] w-full bg-background overflow-hidden">
+    <div className="flex h-screen w-full bg-background overflow-hidden">
         <UserCenterDialog 
             currentConversationId={currentConversationId}
             onSelectConversation={handleSelectConversation}
@@ -357,8 +357,8 @@ export default function ChatPage() {
             <header className="flex items-center justify-between px-6 py-4 border-b border-white/20 bg-white/40 backdrop-blur-md z-10 sticky top-0">
                 <div className="flex items-center gap-3">
                     <div className="flex flex-col">
-                        <h1 className="text-lg font-medium tracking-tight text-foreground/80">深度镜像 (Deep Mirror)</h1>
-                        <span className="text-[10px] text-muted-foreground tracking-widest uppercase opacity-70">v4.0 Cloud Edition</span>
+                        <h1 className="text-lg font-medium tracking-tight text-foreground/80">EchoTalent</h1>
+                        <span className="text-[10px] text-muted-foreground tracking-widest uppercase opacity-70">v4.2 newbrand</span>
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
