@@ -459,7 +459,7 @@ export default function ChatPage() {
                 <form onSubmit={handleSubmit} className="flex gap-1.5 sm:gap-2 items-end relative glass rounded-[26px] p-1.5 sm:p-2 shadow-lg border-white/60">
                 <textarea
                     ref={textareaRef}
-                    className="flex-1 min-w-0 bg-transparent text-foreground rounded-2xl px-3 sm:px-4 py-3 text-sm focus:outline-none placeholder:text-muted-foreground/60 resize-none max-h-[200px] overflow-y-auto min-h-[44px]"
+                    className="flex-1 min-w-0 bg-transparent text-foreground rounded-2xl px-3 sm:px-4 py-3 text-base sm:text-sm focus:outline-none placeholder:text-muted-foreground/60 resize-none max-h-[200px] overflow-y-auto min-h-[44px]"
                     value={input}
                     onChange={handleInputChange}
                     onKeyDown={(e) => {
@@ -480,7 +480,7 @@ export default function ChatPage() {
                     className="rounded-full w-9 h-9 sm:w-10 sm:h-10 shrink-0 bg-primary hover:bg-primary/90 text-white shadow-md transition-transform hover:scale-105 mb-0.5"
                     disabled={isLoading || !input.trim()}
                 >
-                    <Send className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                    <Send className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
                     <span className="sr-only">Send</span>
                 </Button>
                 </form>
