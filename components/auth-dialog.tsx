@@ -64,7 +64,7 @@ export function AuthDialog({ isOpen, onClose, onAuthSuccess }: AuthDialogProps) 
             {isLogin ? '欢迎回来' : '创建账号'}
           </h2>
           <p className="text-sm text-gray-500 mt-1">
-            登录 Deep Mirror Cloud 同步你的职业数据
+            登录 EchoTalent Cloud 同步你的职业数据
           </p>
         </div>
 

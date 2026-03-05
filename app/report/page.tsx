@@ -430,7 +430,7 @@ export default function ReportPage() {
                 我的职业镜像报告
               </h1>
               <p className="text-sm text-muted-foreground mt-1">
-                Deep Mirror · 深度职业画像分析
+                EchoTalent · 天赋回声职业画像
               </p>
             </div>
           </div>

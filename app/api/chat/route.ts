@@ -21,7 +21,7 @@ export async function POST(req: Request) {
     // INJECT PLAN CONTEXT IF AVAILABLE (Long-term Memory)
     if (planContext) {
       systemPrompt = `
-      You are "The Deep Mirror", now acting as a Career Execution Coach.
+      You are "EchoTalent", now acting as a Career Execution Coach.
       
       You have already helped the user generate a career transition plan.
       
