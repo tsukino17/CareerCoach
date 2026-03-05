@@ -24,21 +24,26 @@ export function MessageRenderer({ content, role }: MessageRendererProps) {
         }
 
         // Check for bullet list
-        // If the paragraph contains lines starting with "- ", treat the whole thing as a list candidate
-        if (paragraph.match(/^- /m)) {
+        // If the paragraph contains lines starting with "-", "*", "•", "🔹", or "🔸", treat as list
+        const listMatchRegex = /^[-*•🔹🔸]\s/;
+        
+        if (paragraph.split('\n').some(line => listMatchRegex.test(line.trim()))) {
             const lines = paragraph.split('\n');
             return (
                 <ul key={pIndex} className="list-none space-y-2 my-2">
                     {lines.map((line, lIndex) => {
-                         if (line.trim().startsWith('- ')) {
+                         const trimmedLine = line.trim();
+                         if (listMatchRegex.test(trimmedLine)) {
                              return (
-                               <li key={lIndex} className="flex gap-2 items-start">
-                                 <span className="text-primary mt-1.5 text-[0.6rem]">●</span>
-                                 <span className="flex-1">{formatText(line.replace(/^- /, ''))}</span>
+                               <li key={lIndex} className="flex gap-3 items-start">
+                                 <span className="flex h-7 items-center shrink-0">
+                                    <span className="w-1.5 h-1.5 bg-primary rounded-full" />
+                                 </span>
+                                 <span className="flex-1 leading-7 tracking-wide">{formatText(trimmedLine.replace(listMatchRegex, ''))}</span>
                                </li>
                              );
                          }
-                         return <li key={lIndex} className="pl-5">{formatText(line)}</li>
+                         return <li key={lIndex} className="pl-5 leading-7 tracking-wide">{formatText(line)}</li>
                     })}
                 </ul>
             )
