@@ -325,7 +325,7 @@ export default function ChatPage() {
   };
 
   return (
-    <div className="flex h-screen w-full bg-background overflow-hidden">
+    <div className="flex h-[100dvh] w-full bg-background overflow-hidden">
         <UserCenterDialog 
             currentConversationId={currentConversationId}
             onSelectConversation={handleSelectConversation}
@@ -354,33 +354,33 @@ export default function ChatPage() {
             )}
             
             {/* Header */}
-            <header className="flex items-center justify-between px-6 py-4 border-b border-white/20 bg-white/40 backdrop-blur-md z-10 sticky top-0">
+            <header className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-white/20 bg-white/40 backdrop-blur-md z-10 sticky top-0">
                 <div className="flex items-center gap-3">
                     <div className="flex flex-col">
                         <h1 className="text-lg font-medium tracking-tight text-foreground/80">EchoTalent</h1>
                         <span className="text-[10px] text-muted-foreground tracking-widest uppercase opacity-70">v4.2 newbrand</span>
                     </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 sm:gap-2">
                     <Button
                         variant="ghost"
                         size="icon"
                         onClick={clearHistory}
                         title="清空记录"
-                        className="text-muted-foreground hover:text-red-500 hover:bg-white/50 rounded-full transition-colors"
+                        className="text-muted-foreground hover:text-red-500 hover:bg-white/50 rounded-full transition-colors w-8 h-8 sm:w-9 sm:h-9"
                     >
-                        <Trash2 className="w-4 h-4" />
+                        <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                     </Button>
                     
                     {planData && (
                     <Button
                         variant="outline"
                         size="sm"
-                        className="gap-2 text-primary border-primary/20 hover:bg-primary/10 rounded-full bg-white/50 backdrop-blur-sm shadow-sm"
+                        className="gap-1.5 sm:gap-2 text-primary border-primary/20 hover:bg-primary/10 rounded-full bg-white/50 backdrop-blur-sm shadow-sm px-2.5 sm:px-3 text-xs sm:text-sm"
                         onClick={() => setShowPlan(true)}
                     >
-                        <Calendar className="w-4 h-4" />
-                        计划
+                        <Calendar className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                        <span className="hidden xs:inline">计划</span>
                     </Button>
                     )}
 
@@ -388,16 +388,16 @@ export default function ChatPage() {
                     <Button 
                         variant="outline" 
                         size="sm" 
-                        className="gap-2 animate-in fade-in zoom-in duration-500 rounded-full bg-white/50 backdrop-blur-sm border-primary/20 text-primary shadow-sm hover:bg-white/80"
+                        className="gap-1.5 sm:gap-2 animate-in fade-in zoom-in duration-500 rounded-full bg-white/50 backdrop-blur-sm border-primary/20 text-primary shadow-sm hover:bg-white/80 px-2.5 sm:px-3 text-xs sm:text-sm"
                         onClick={handleGenerateReport}
                         disabled={isGeneratingReport}
                     >
                         {isGeneratingReport ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <Loader2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-spin" />
                         ) : (
-                            <FileText className="w-4 h-4" />
+                            <FileText className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                         )}
-                        {isGeneratingReport ? (loadingStep || '分析中...') : '生成职业报告'}
+                        <span className="hidden xs:inline">{isGeneratingReport ? (loadingStep || '分析中...') : '职业报告'}</span>
                     </Button>
                     )}
 
@@ -405,10 +405,10 @@ export default function ChatPage() {
                         variant="ghost"
                         size="icon"
                         onClick={() => setIsUserCenterOpen(true)}
-                        className="rounded-full w-9 h-9 bg-secondary/10 hover:bg-secondary/20 ml-1 border border-white/20"
+                        className="rounded-full w-8 h-8 sm:w-9 sm:h-9 bg-secondary/10 hover:bg-secondary/20 ml-0.5 sm:ml-1 border border-white/20"
                         title="用户中心"
                     >
-                        <User className="w-5 h-5 text-foreground/70" />
+                        <User className="w-4 h-4 sm:w-5 sm:h-5 text-foreground/70" />
                     </Button>
                 </div>
             </header>
@@ -455,11 +455,11 @@ export default function ChatPage() {
             </div>
 
             {/* Input Area */}
-            <div className="p-4 md:px-8 md:pb-8 bg-transparent">
-                <form onSubmit={handleSubmit} className="flex gap-2 items-end relative glass rounded-[26px] p-2 shadow-lg border-white/60">
+            <div className="p-2 sm:p-4 md:px-8 md:pb-8 bg-transparent">
+                <form onSubmit={handleSubmit} className="flex gap-1.5 sm:gap-2 items-end relative glass rounded-[26px] p-1.5 sm:p-2 shadow-lg border-white/60">
                 <textarea
                     ref={textareaRef}
-                    className="flex-1 bg-transparent text-foreground rounded-2xl px-4 py-3 text-sm focus:outline-none placeholder:text-muted-foreground/60 resize-none max-h-[200px] overflow-y-auto min-h-[44px]"
+                    className="flex-1 min-w-0 bg-transparent text-foreground rounded-2xl px-3 sm:px-4 py-3 text-sm focus:outline-none placeholder:text-muted-foreground/60 resize-none max-h-[200px] overflow-y-auto min-h-[44px]"
                     value={input}
                     onChange={handleInputChange}
                     onKeyDown={(e) => {
@@ -477,10 +477,10 @@ export default function ChatPage() {
                 <Button 
                     type="submit" 
                     size="icon" 
-                    className="rounded-full w-10 h-10 shrink-0 bg-primary hover:bg-primary/90 text-white shadow-md transition-transform hover:scale-105 mb-0.5"
+                    className="rounded-full w-9 h-9 sm:w-10 sm:h-10 shrink-0 bg-primary hover:bg-primary/90 text-white shadow-md transition-transform hover:scale-105 mb-0.5"
                     disabled={isLoading || !input.trim()}
                 >
-                    <Send className="w-4 h-4" />
+                    <Send className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                     <span className="sr-only">Send</span>
                 </Button>
                 </form>
