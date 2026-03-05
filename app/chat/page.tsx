@@ -157,7 +157,7 @@ export default function ChatPage() {
       {
         id: 'welcome',
         role: 'assistant',
-        content: "你好。我是这里的倾听者，也是你的职业镜像。我想通过对话，帮你发现你可能忽略的职业优势。今天你的职业状态感觉如何？",
+        content: "你好。我是这里的倾听者，也是你的天赋挖掘者。我想通过对话，帮你发现你可能忽略的职业优势。今天你的职业状态感觉如何？",
       }
     ],
     onFinish: handleFinish,
@@ -317,7 +317,7 @@ export default function ChatPage() {
         {
           id: 'welcome',
           role: 'assistant',
-          content: "你好。我是这里的倾听者，也是你的职业镜像。我想通过对话，帮你发现你可能忽略的职业优势。今天你的职业状态感觉如何？",
+          content: "你好。我是这里的倾听者，也是你的天赋挖掘者。我想通过对话，帮你发现你可能忽略的职业优势。今天你的职业状态感觉如何？",
         }
       ]);
       // Close user center

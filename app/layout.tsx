@@ -10,8 +10,8 @@ const notoSansSC = Noto_Sans_SC({
 });
 
 export const metadata: Metadata = {
-  title: "深度镜像 | The Deep Mirror",
-  description: "发现你隐藏的职业资产。",
+  title: "天赋回声 | Echo Talent",
+  description: "听见你的天赋回声，发现你隐藏的职业优势。",
 };
 
 export default function RootLayout({

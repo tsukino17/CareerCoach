@@ -12,16 +12,16 @@ export default function Home() {
 
       <div className="max-w-2xl space-y-8 glass-card p-12 rounded-[2rem] relative z-10 animate-in fade-in zoom-in duration-700">
         <h1 className="text-4xl font-bold tracking-tight sm:text-6xl text-foreground/90">
-          发现你隐藏的<br/>
-          <span className="text-primary">职业资产</span>
+          听见你的<br/>
+          <span className="text-primary">天赋回声</span>
         </h1>
-        <p className="text-xl text-muted-foreground/80 font-light">
-          15 分钟。无需填表。仅仅是一次深度对话。
+        <p className="text-lg text-muted-foreground/80 font-light max-w-md mx-auto">
+          通过轻松的对话，让 AI 帮你剥离迷雾，精准定位你的职业天赋与热爱
         </p>
         <div className="flex justify-center pt-4">
           <Link href="/chat">
             <Button size="lg" className="px-10 py-6 text-lg rounded-full shadow-lg bg-primary hover:bg-primary/90 text-white transition-transform hover:scale-105">
-              开始深度探索
+              开启探索之旅
             </Button>
           </Link>
         </div>
