@@ -39,24 +39,30 @@ export default function UserCenterPage() {
     // Check auth status
     supabase.auth.getUser().then(({ data: { user } }) => {
         setUser(user);
-        if (user) fetchConversations();
-        else setLoading(false);
+        fetchConversations(user);
     });
   }, []);
 
-  async function fetchConversations() {
+  async function fetchConversations(currentUser?: any) {
     setLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      const targetUser = currentUser; // Use passed user or state
 
-      const { data, error } = await supabase
-        .from('conversations')
-        .select('*')
-        .order('created_at', { ascending: false });
+      if (targetUser) {
+        const { data, error } = await supabase
+            .from('conversations')
+            .select('*')
+            .order('created_at', { ascending: false });
 
-      if (error) throw error;
-      if (data) setConversations(data);
+        if (error) throw error;
+        if (data) setConversations(data);
+      } else {
+        // Load local conversations
+        const savedHistory = localStorage.getItem('career_conversations_meta');
+        if (savedHistory) {
+            setConversations(JSON.parse(savedHistory));
+        }
+      }
     } catch (error) {
       console.error('Error fetching conversations:', error);
     } finally {
@@ -69,8 +75,19 @@ export default function UserCenterPage() {
     if (!confirm('确定要删除这段对话吗？')) return;
 
     try {
-      await supabase.from('conversations').delete().eq('id', id);
-      setConversations(prev => prev.filter(c => c.id !== id));
+      if (user) {
+        await supabase.from('conversations').delete().eq('id', id);
+        setConversations(prev => prev.filter(c => c.id !== id));
+      } else {
+        // Local delete
+        const savedHistory = localStorage.getItem('career_conversations_meta');
+        if (savedHistory) {
+            const list = JSON.parse(savedHistory);
+            const newList = list.filter((c: any) => c.id !== id);
+            localStorage.setItem('career_conversations_meta', JSON.stringify(newList));
+            setConversations(newList);
+        }
+      }
     } catch (error) {
       console.error('Error deleting conversation:', error);
     }
@@ -78,19 +95,40 @@ export default function UserCenterPage() {
 
   async function exportConversation(e: React.MouseEvent, conversation: Conversation) {
     e.stopPropagation();
+    // Temporarily disabled auth check
+    /*
     if (!user) {
         setShowAuth(true);
         return;
     }
+    */
 
     try {
-        const { data: messages, error } = await supabase
-            .from('messages')
-            .select('*')
-            .eq('conversation_id', conversation.id)
-            .order('created_at', { ascending: true });
+        let messages: any[] = [];
+        
+        if (user) {
+            const { data, error } = await supabase
+                .from('messages')
+                .select('*')
+                .eq('conversation_id', conversation.id)
+                .order('created_at', { ascending: true });
 
-        if (error) throw error;
+            if (error) throw error;
+            messages = data || [];
+        } else {
+            // Local export
+            // Try to find in the conversation object itself (if it has messages) or localStorage
+            if ((conversation as any).messages) {
+                messages = (conversation as any).messages;
+            } else {
+                const savedHistory = localStorage.getItem('career_conversations_meta');
+                if (savedHistory) {
+                    const list = JSON.parse(savedHistory);
+                    const found = list.find((c: any) => c.id === conversation.id);
+                    if (found) messages = found.messages || [];
+                }
+            }
+        }
 
         const exportText = messages.map(m => 
             `${m.role === 'user' ? '我' : 'AI'}: ${m.content}`

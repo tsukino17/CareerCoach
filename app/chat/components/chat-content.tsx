@@ -242,7 +242,27 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
   // Sidebar Actions
   const handleSelectConversation = async (id: string) => {
       setCurrentConversationId(id);
-      // Fetch messages from Supabase
+      
+      // 1. Try local storage first (for anonymous chats)
+      try {
+        const savedHistory = localStorage.getItem('career_conversations_meta');
+        if (savedHistory) {
+            const conversations = JSON.parse(savedHistory);
+            const localConv = conversations.find((c: any) => c.id === id);
+            if (localConv && localConv.messages) {
+                setMessages(localConv.messages.map((m: any) => ({
+                    id: m.id || Math.random().toString(36).substring(7),
+                    role: m.role,
+                    content: m.content
+                })));
+                return; 
+            }
+        }
+      } catch (e) {
+        console.error('Error loading local conversation:', e);
+      }
+
+      // 2. Fetch messages from Supabase
       try {
           const { data, error } = await supabase
             .from('messages')
@@ -250,7 +270,7 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
             .eq('conversation_id', id)
             .order('created_at', { ascending: true });
             
-          if (data) {
+          if (data && data.length > 0) {
               setMessages(data.map(m => ({
                   id: m.id,
                   role: m.role as any,
@@ -264,6 +284,8 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
 
   const handleNewChat = async () => {
       // 1. Check auth for new chat if we have many anonymous conversations
+      // Temporarily disabled as per user request
+      /*
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
           const savedHistory = localStorage.getItem('career_conversations_meta');
@@ -275,6 +297,7 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
               return;
           }
       }
+      */
 
       // 2. If there's an ongoing chat, try to generate a final summary AND save it locally for anonymous user
       if (messages.length > 2) {
@@ -452,12 +475,15 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
 
   const handleGenerateReport = async () => {
     // Check auth before report generation
+    // Temporarily disabled auth check
+    /*
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
         setPendingAction('report');
         setShowAuth(true);
         return;
     }
+    */
 
     setIsGeneratingReport(true);
     
