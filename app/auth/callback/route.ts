@@ -8,10 +8,15 @@ export async function GET(request: Request) {
   const next = searchParams.get('next') ?? '/chat';
 
   if (code) {
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    );
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+    if (!supabaseUrl || !supabaseAnonKey) {
+      console.error('Missing Supabase environment variables');
+      return NextResponse.redirect(`${origin}/auth/auth-code-error?error=missing_env`);
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
       // 成功后，重定向到用户中心或聊天页面
