@@ -481,7 +481,7 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
   const showBottomButtons = showReportButton && messages.length >= continueThreshold;
 
   return (
-    <div className="flex h-[100dvh] w-full bg-background overflow-hidden">
+    <div className="flex h-[100dvh] w-full bg-background overflow-hidden safe-area-padding">
         {/* Main Content Area */}
         <main className={cn(
             "flex-1 flex flex-col h-full relative transition-all duration-300",
@@ -502,7 +502,7 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
             )}
             
             {/* Header */}
-            <header className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-white/20 bg-white/40 backdrop-blur-md z-10 sticky top-0">
+            <header className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-white/20 bg-white/40 backdrop-blur-md z-10 sticky top-0 shrink-0">
                 <div className="flex items-center gap-3">
                     <div className="flex flex-col">
                         <h1 className="text-lg font-medium tracking-tight text-foreground/80">EchoTalent</h1>
@@ -563,7 +563,7 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
             </header>
 
             {/* Chat Area */}
-            <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 scroll-smooth">
+            <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 scroll-smooth pb-24 md:pb-8">
                 {error && (
                     <div className="w-full p-4 mb-4 text-sm text-red-500 bg-red-50/80 backdrop-blur rounded-2xl border border-red-100 shadow-sm" role="alert">
                         <span className="font-medium">出错啦：</span> {error.message}
@@ -640,7 +640,7 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
             </div>
 
             {/* Input Area */}
-            <div className="p-2 sm:p-4 md:px-8 md:pb-8 bg-transparent">
+            <div className="p-2 sm:p-4 md:px-8 md:pb-8 bg-transparent absolute bottom-0 left-0 right-0 z-20 md:relative md:bg-transparent">
                 <form onSubmit={handleSubmit} className="flex gap-1.5 sm:gap-2 items-end relative glass rounded-[26px] p-1.5 sm:p-2 shadow-lg border-white/60">
                 <textarea
                     ref={textareaRef}

@@ -74,4 +74,9 @@
   .text-balance {
     text-wrap: balance;
   }
+  
+  /* Mobile Safe Area Utilities */
+  .safe-area-padding {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
 }
