@@ -225,30 +225,30 @@ export default function UserCenterPage() {
             </div>
 
             {/* Navigation Tabs (Desktop: Vertical list, Mobile: Horizontal scroll or Grid) */}
-            <div className="bg-card border border-border rounded-2xl p-2 flex flex-row md:flex-col gap-1 overflow-x-auto md:overflow-visible">
+            <div className="bg-card border border-border rounded-2xl p-2 flex flex-row md:flex-col gap-1 overflow-x-auto md:overflow-visible shrink-0">
                 <Button 
                     variant={activeTab === 'history' ? "secondary" : "ghost"} 
-                    className="justify-start gap-3 flex-1 md:flex-none whitespace-nowrap"
+                    className="justify-start gap-3 flex-1 md:flex-none whitespace-nowrap px-3"
                     onClick={() => setActiveTab('history')}
                 >
-                    <MessageSquare className="w-4 h-4" />
+                    <MessageSquare className="w-4 h-4 shrink-0" />
                     历史对话
                 </Button>
                 <Button 
                     variant={activeTab === 'reports' ? "secondary" : "ghost"} 
-                    className="justify-start gap-3 flex-1 md:flex-none whitespace-nowrap"
+                    className="justify-start gap-3 flex-1 md:flex-none whitespace-nowrap px-3"
                     onClick={() => setActiveTab('reports')}
                 >
-                    <FileText className="w-4 h-4" />
+                    <FileText className="w-4 h-4 shrink-0" />
                     我的报告
                     <Badge variant="outline" className="ml-auto text-[10px] h-5 px-1.5 hidden md:flex">New</Badge>
                 </Button>
                 <Button 
                     variant={activeTab === 'plan' ? "secondary" : "ghost"} 
-                    className="justify-start gap-3 flex-1 md:flex-none whitespace-nowrap"
+                    className="justify-start gap-3 flex-1 md:flex-none whitespace-nowrap px-3"
                     onClick={() => setActiveTab('plan')}
                 >
-                    <Calendar className="w-4 h-4" />
+                    <Calendar className="w-4 h-4 shrink-0" />
                     行动计划
                 </Button>
             </div>
