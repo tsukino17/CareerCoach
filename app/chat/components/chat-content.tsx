@@ -74,7 +74,7 @@ function GenerationLoading({ currentStep }: { currentStep: string }) {
   );
 }
 
-export default function ChatContent() {
+function ChatContentInner() {
   const [planData, setPlanData] = useState(null);
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -689,4 +689,8 @@ export default function ChatContent() {
         />
     </div>
   );
+}
+
+export default function ChatContent() {
+  return <ChatContentInner />;
 }
