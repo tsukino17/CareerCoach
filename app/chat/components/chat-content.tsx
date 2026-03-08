@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { PlanCard } from '@/components/plan-card';
 import { MessageRenderer } from '@/components/message-renderer';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { AuthDialog } from '@/components/auth-dialog';
 
@@ -74,12 +74,14 @@ function GenerationLoading({ currentStep }: { currentStep: string }) {
   );
 }
 
-function ChatContentInner() {
+interface ChatContentProps {
+  urlId: string | null;
+  isNewChatRequested: boolean;
+}
+
+function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
   const [planData, setPlanData] = useState(null);
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const urlId = searchParams.get('id');
-  const isNewChatRequested = searchParams.get('new') === 'true';
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   
   // Sync messages to Supabase when a turn finishes
@@ -691,6 +693,6 @@ function ChatContentInner() {
   );
 }
 
-export default function ChatContent() {
-  return <ChatContentInner />;
+export default function ChatContent({ urlId, isNewChatRequested }: ChatContentProps) {
+  return <ChatContentInner urlId={urlId} isNewChatRequested={isNewChatRequested} />;
 }
