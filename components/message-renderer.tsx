@@ -24,26 +24,41 @@ export function MessageRenderer({ content, role }: MessageRendererProps) {
         }
 
         // Check for bullet list
-        // If the paragraph contains lines starting with "-", "*", "•", "🔹", or "🔸", treat as list
-        const listMatchRegex = /^[-*•🔹🔸]\s/;
+        // If the paragraph contains lines starting with "-", "*", "•", "🔹", "🔷", "🔸", "🔶", treat as list
+        // Also support numbered lists roughly (though we render them as bullets for now to match the design request)
+        const listMatchRegex = /^(\s*[-*•🔹🔷🔸🔶]|\d+\.)\s/;
         
-        if (paragraph.split('\n').some(line => listMatchRegex.test(line.trim()))) {
-            const lines = paragraph.split('\n');
+        const lines = paragraph.split('\n');
+        if (lines.some(line => listMatchRegex.test(line.trim()))) {
             return (
-                <ul key={pIndex} className="list-none space-y-2 my-2">
+                <ul key={pIndex} className="list-none space-y-2 my-3">
                     {lines.map((line, lIndex) => {
                          const trimmedLine = line.trim();
-                         if (listMatchRegex.test(trimmedLine)) {
+                         const match = trimmedLine.match(listMatchRegex);
+                         
+                         if (match) {
+                             const content = trimmedLine.substring(match[0].length);
                              return (
-                               <li key={lIndex} className="flex gap-3 items-start">
-                                 <span className="flex h-7 items-center shrink-0">
-                                    <span className="w-1.5 h-1.5 bg-primary rounded-full" />
+                               <li key={lIndex} className="flex gap-3 items-start group">
+                                 <span className="flex h-[1.625rem] items-center shrink-0 mt-0.5">
+                                    <span className="w-1.5 h-1.5 bg-primary/80 rounded-full group-hover:scale-125 transition-transform duration-300" />
                                  </span>
-                                 <span className="flex-1 leading-7 tracking-wide">{formatText(trimmedLine.replace(listMatchRegex, ''))}</span>
+                                 <span className="flex-1 leading-relaxed text-foreground/90">
+                                    {formatText(content)}
+                                 </span>
                                </li>
                              );
                          }
-                         return <li key={lIndex} className="pl-5 leading-7 tracking-wide">{formatText(line)}</li>
+                         // Handle lines that are part of the list but don't start with a bullet (continuation)
+                         // Only if it's not an empty line
+                         if (trimmedLine) {
+                            return (
+                                <li key={lIndex} className="pl-5 leading-relaxed text-foreground/90 opacity-80">
+                                    {formatText(line)}
+                                </li>
+                            );
+                         }
+                         return null;
                     })}
                 </ul>
             )

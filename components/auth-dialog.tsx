@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { X, Loader2, Mail, Lock } from 'lucide-react';
@@ -13,11 +13,33 @@ interface AuthDialogProps {
 }
 
 export function AuthDialog({ isOpen, onClose, onAuthSuccess }: AuthDialogProps) {
-  const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // Poll for session status when waiting for email confirmation
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isOpen && successMessage) {
+        interval = setInterval(async () => {
+            // Check if user has verified email (by trying to sign in silently or checking session)
+            // Strategy: Since we have the password in state, we can try to sign in in background
+            const { data, error } = await supabase.auth.signInWithPassword({
+                email,
+                password
+            });
+            
+            if (data.session) {
+                clearInterval(interval);
+                onAuthSuccess();
+                onClose();
+            }
+        }, 3000); // Check every 3 seconds
+    }
+    return () => clearInterval(interval);
+  }, [isOpen, successMessage, email, password, onAuthSuccess, onClose]);
 
   if (!isOpen) return null;
 
@@ -25,24 +47,58 @@ export function AuthDialog({ isOpen, onClose, onAuthSuccess }: AuthDialogProps) 
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setSuccessMessage(null);
 
     try {
-      if (isLogin) {
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-        });
-        if (error) throw error;
+      // 1. Try to Sign In first
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (!signInError && signInData.session) {
+        onAuthSuccess();
+        onClose();
+        return;
       }
-      onAuthSuccess();
-      onClose();
+
+      // 2. If Sign In failed, check if it's a credential issue
+      // If so, try to Sign Up (assuming user might be new)
+      if (signInError && (signInError.message.includes('Invalid login credentials') || signInError.message.includes('Email not confirmed'))) {
+        
+        // Attempt Sign Up
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            emailRedirectTo: `${window.location.origin}/auth/callback`,
+          },
+        });
+
+        if (signUpError) {
+          // If Sign Up also fails, check if it's because user already exists
+          if (signUpError.message.includes('User already registered') || signUpError.message.includes('already registered')) {
+            throw new Error('密码错误，请重试'); // Password wrong (since user exists but login failed)
+          }
+          throw signUpError;
+        }
+
+        // Sign Up successful
+        if (signUpData.session) {
+            onAuthSuccess();
+            onClose();
+            return;
+        } else if (signUpData.user && !signUpData.session) {
+             // Registration successful but needs confirmation
+             setSuccessMessage('注册成功！请前往您的邮箱查收验证邮件，点击链接后即可登录。');
+             return;
+        }
+      } else if (signInError) {
+        throw signInError;
+      }
+
     } catch (err: any) {
+      console.error('Auth flow error:', err);
       setError(err.message || 'Authentication failed');
     } finally {
       setLoading(false);
@@ -61,32 +117,11 @@ export function AuthDialog({ isOpen, onClose, onAuthSuccess }: AuthDialogProps) 
 
         <div className="mb-6 text-center">
           <h2 className="text-2xl font-bold text-gray-900 tracking-tight">
-            {isLogin ? '欢迎回来' : '创建账号'}
+            欢迎来到 EchoTalent
           </h2>
           <p className="text-sm text-gray-500 mt-1">
-            登录 EchoTalent Cloud 同步你的职业数据
+            登录或注册以同步你的职业数据
           </p>
-        </div>
-
-        <div className="flex p-1 mb-6 bg-gray-100 rounded-lg">
-          <button
-            className={cn(
-              "flex-1 py-1.5 text-sm font-medium rounded-md transition-all",
-              isLogin ? "bg-white text-primary shadow-sm" : "text-gray-500 hover:text-gray-700"
-            )}
-            onClick={() => setIsLogin(true)}
-          >
-            登录
-          </button>
-          <button
-            className={cn(
-              "flex-1 py-1.5 text-sm font-medium rounded-md transition-all",
-              !isLogin ? "bg-white text-primary shadow-sm" : "text-gray-500 hover:text-gray-700"
-            )}
-            onClick={() => setIsLogin(false)}
-          >
-            注册
-          </button>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -127,15 +162,21 @@ export function AuthDialog({ isOpen, onClose, onAuthSuccess }: AuthDialogProps) 
             </div>
           )}
 
+          {successMessage && (
+            <div className="p-3 text-sm text-green-600 bg-green-50 rounded-lg border border-green-100">
+              {successMessage}
+            </div>
+          )}
+
           <Button 
             type="submit" 
             className="w-full rounded-xl py-5 text-base font-medium shadow-lg shadow-primary/20"
-            disabled={loading}
+            disabled={loading || !!successMessage}
           >
             {loading ? (
               <Loader2 className="w-5 h-5 animate-spin mr-2" />
             ) : null}
-            {isLogin ? '登录' : '注册并登录'}
+            登录 / 注册
           </Button>
         </form>
 

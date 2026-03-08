@@ -14,6 +14,13 @@ export const metadata: Metadata = {
   description: "听见你的天赋回声，发现你隐藏的职业优势。",
 };
 
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{

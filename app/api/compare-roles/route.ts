@@ -2,7 +2,7 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { generateObject } from 'ai';
 import { z } from 'zod';
 import { sanitizeResponseContent } from '@/lib/utils';
-import { GEM_POLISHER_V2_REPORT_PROMPT } from '@/lib/prompt-versions';
+import { GENTLE_BREEZE_V4_REPORT_PROMPT } from '@/lib/prompt-versions';
 
 export const runtime = 'edge';
 export const maxDuration = 60;
@@ -42,23 +42,15 @@ export async function POST(req: Request) {
       apiKey: process.env.DASHSCOPE_API_KEY,
     });
 
-    const systemPrompt = `You are an expert career counselor.
+    // Use the same empathetic report prompt for consistency in tone
+    const systemPrompt = GENTLE_BREEZE_V4_REPORT_PROMPT + `
+    
+    ADDITIONAL INSTRUCTION:
     Your task is to compare two potential career paths for a user with the archetype "${archetype}".
     User Context: ${JSON.stringify(context)}
     
     Analyze both roles deeply and provide a side-by-side comparison.
     Focus on practical aspects: salary, fit, growth potential, and daily reality.
-    
-    **GUIDELINES**:
-    1. **Language**: Simplified Chinese (简体中文).
-    2. **Tone**: 
-       - **Professional & Objective**: Maintain a neutral, professional stance. Avoid slang or overly casual expressions.
-       - **Encouraging**: Highlight the positive aspects of both roles to inspire the user.
-       - **Kind**: Present challenges as "constructive considerations" rather than negatives.
-    3. **Formatting & Punctuation**: 
-       - **STRICTLY FORBIDDEN**: Single quotes ('').
-       - **REQUIRED**: Use Chinese double quotes (“”) for any emphasis.
-       - **REQUIRED**: Use proper Chinese punctuation (，。、：) throughout.
     
     Output structured JSON.`;
 
