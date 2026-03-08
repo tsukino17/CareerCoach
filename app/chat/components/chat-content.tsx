@@ -377,21 +377,56 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
           setIsLoaded(true);
       };
 
-      if (user) {
-        // If a new chat is explicitly requested, skip loading the last one and reset UI
-        if (isNewChatRequested) {
-            setCurrentConversationId(null);
-            setMessages([
-              {
-                id: 'welcome',
-                role: 'assistant',
-                content: "你好。我是这里的倾听者，也是你的天赋挖掘者。我想通过对话，帮你发现你可能忽略的职业优势。今天你的职业状态感觉如何？",
-              }
-            ]);
-            handleLoaded();
-            return;
+      // 1. Handle New Chat Request (Both Logged In and Anonymous)
+      if (isNewChatRequested) {
+        // If anonymous, try to save current session before clearing
+        if (!user) {
+            const currentSession = localStorage.getItem(STORAGE_KEY);
+            if (currentSession) {
+                try {
+                    const parsedMsgs = JSON.parse(currentSession);
+                    if (parsedMsgs.length > 2) {
+                         const savedHistory = localStorage.getItem('career_conversations_meta');
+                         const conversations = savedHistory ? JSON.parse(savedHistory) : [];
+                         
+                         const title = parsedMsgs.find((m: any) => m.role === 'user')?.content.substring(0, 20) || '新对话';
+                         
+                         const newConv = {
+                            id: Date.now().toString(),
+                            title: title + '...',
+                            created_at: new Date().toISOString(),
+                            messages: parsedMsgs
+                         };
+                         
+                         conversations.unshift(newConv);
+                         localStorage.setItem('career_conversations_meta', JSON.stringify(conversations));
+                    }
+                } catch (e) {
+                    console.error('Failed to save previous session on new chat', e);
+                }
+            }
+            // Clear current session
+            localStorage.removeItem(STORAGE_KEY);
+            localStorage.removeItem(PLAN_STORAGE_KEY);
+            
+            // Clean up URL
+            router.replace('/chat');
         }
 
+        setCurrentConversationId(null);
+        setMessages([
+          {
+            id: 'welcome',
+            role: 'assistant',
+            content: "你好。我是这里的倾听者，也是你的天赋挖掘者。我想通过对话，帮你发现你可能忽略的职业优势。今天你的职业状态感觉如何？",
+          }
+        ]);
+        setPlanData(null);
+        handleLoaded();
+        return;
+      }
+
+      if (user) {
         // If we have a URL ID, prioritize it
         if (urlId) {
             await handleSelectConversation(urlId);
