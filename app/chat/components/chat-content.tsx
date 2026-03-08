@@ -276,24 +276,45 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
           }
       }
 
-      // 2. If there's an ongoing chat, try to generate a final summary for it before clearing
-      if (currentConversationId && messages.length > 2) {
-          fetch('/api/summarize', {
-              method: 'POST',
-              body: JSON.stringify({ messages })
-          })
-          .then(res => res.json())
-          .then(data => {
-              if (data.title) {
-                  supabase.from('conversations')
-                      .update({ title: data.title })
-                      .eq('id', currentConversationId)
-                      .then(({ error }) => {
-                          if (error) console.error('Failed to update final title', error);
-                      });
-              }
-          })
-          .catch(err => console.error('Failed to generate final summary', err));
+      // 2. If there's an ongoing chat, try to generate a final summary AND save it locally for anonymous user
+      if (messages.length > 2) {
+          // If logged in, sync to cloud (already handled by handleFinish, but let's ensure summary)
+          if (currentConversationId) {
+            fetch('/api/summarize', {
+                method: 'POST',
+                body: JSON.stringify({ messages })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.title) {
+                    supabase.from('conversations')
+                        .update({ title: data.title })
+                        .eq('id', currentConversationId)
+                        .then(({ error }) => {
+                            if (error) console.error('Failed to update final title', error);
+                        });
+                }
+            })
+            .catch(err => console.error('Failed to generate final summary', err));
+          } else {
+             // Anonymous User: Save to Local Storage "Meta" List
+             const savedHistory = localStorage.getItem('career_conversations_meta');
+             const conversations = savedHistory ? JSON.parse(savedHistory) : [];
+             
+             // Generate a simple title or use the first message
+             const title = messages.find(m => m.role === 'user')?.content.substring(0, 20) || '新对话';
+             
+             const newConv = {
+                id: Date.now().toString(), // Temporary ID
+                title: title + '...',
+                created_at: new Date().toISOString(),
+                messages: messages // Save full content
+             };
+             
+             // Add to list
+             conversations.unshift(newConv);
+             localStorage.setItem('career_conversations_meta', JSON.stringify(conversations));
+          }
       }
       
       // 3. Clear state
@@ -305,6 +326,12 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
           content: "你好。我是这里的倾听者，也是你的天赋挖掘者。我想通过对话，帮你发现你可能忽略的职业优势。今天你的职业状态感觉如何？",
         }
       ]);
+      setPlanData(null);
+      
+      // Clear current session storage
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(PLAN_STORAGE_KEY);
+
       // Remove URL params
       router.push('/chat');
   };
