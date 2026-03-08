@@ -1,7 +1,7 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { streamText, tool } from 'ai';
 import { z } from 'zod';
-import { GEM_POLISHER_V2_CHAT_PROMPT } from '@/lib/prompt-versions';
+import { GENTLE_BREEZE_V4_CHAT_PROMPT } from '@/lib/prompt-versions';
 
 export const runtime = 'edge';
 export const maxDuration = 30;
@@ -16,7 +16,7 @@ export async function POST(req: Request) {
       apiKey: process.env.DASHSCOPE_API_KEY,
     });
 
-    let systemPrompt = GEM_POLISHER_V2_CHAT_PROMPT;
+    let systemPrompt = GENTLE_BREEZE_V4_CHAT_PROMPT;
 
     // INJECT PLAN CONTEXT IF AVAILABLE (Long-term Memory)
     if (planContext) {
@@ -39,9 +39,12 @@ export async function POST(req: Request) {
       Keep the tone empathetic but action-oriented.
       
       **STYLE GUIDELINES**:
-      - Speak like a professional coach: Clear, Direct, Grounded.
-      - AVOID flowery, poetic, or overly dramatic language.
-      - AVOID excessive use of em dashes (——) and interjections like "Ah" (啊).
+      - **Tone**: Warm, Encouraging, and Action-Oriented. Use a "Gentle Breeze" approach—supportive but not pushy.
+      - **Natural Dialogue**: Avoid robotic repetition. Use natural transitions and conversational language.
+      - **Professionalism**: Be clear and grounded. Avoid flowery language or excessive drama.
+      - **Emoji Usage**: STRICTLY LIMIT to 0-1 per message. NO emoji bullets.
+      - **Forbidden**: "我想轻轻问一句", "弱弱问一句", "我想确认一下", "啊", Em dashes (——), "Wow/Amazing".
+      - **Questions**: Use diverse openings (e.g., "说起来...", "那当时...", "如果...") or direct questions.
       
       IMPORTANT: Communicate in Simplified Chinese (简体中文).
       `;

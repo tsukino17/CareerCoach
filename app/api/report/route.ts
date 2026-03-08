@@ -2,7 +2,7 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { generateObject } from 'ai';
 import { z } from 'zod';
 import { sanitizeResponseContent } from '@/lib/utils';
-import { GEM_POLISHER_V2_REPORT_PROMPT } from '@/lib/prompt-versions';
+import { GENTLE_BREEZE_V4_REPORT_PROMPT } from '@/lib/prompt-versions';
 
 export const runtime = 'edge';
 export const maxDuration = 60;
@@ -31,7 +31,7 @@ export async function POST(req: Request) {
       apiKey: process.env.DASHSCOPE_API_KEY,
     });
 
-    const systemPrompt = GEM_POLISHER_V2_REPORT_PROMPT;
+    const systemPrompt = GENTLE_BREEZE_V4_REPORT_PROMPT;
 
     const { object } = await generateObject({
       model: openai('qwen-plus'),

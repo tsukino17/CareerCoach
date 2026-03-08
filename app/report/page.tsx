@@ -427,10 +427,10 @@ export default function ReportPage() {
             </Button>
             <div>
               <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
-                我的职业镜像报告
+                我的职业全景画像
               </h1>
               <p className="text-sm text-muted-foreground mt-1">
-                EchoTalent · 天赋回声职业画像
+                My Career Panorama
               </p>
             </div>
           </div>

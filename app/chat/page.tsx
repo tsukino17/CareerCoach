@@ -3,18 +3,29 @@
 
 import { useChat } from 'ai/react';
 import { useRef, useEffect, useState } from 'react';
-import { Send, FileText, Loader2, Trash2, Calendar, Sparkles, User } from 'lucide-react';
+import { Send, FileText, Loader2, MessageSquarePlus, Calendar, Sparkles, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { PlanCard } from '@/components/plan-card';
 import { MessageRenderer } from '@/components/message-renderer';
-import { useRouter } from 'next/navigation';
-import { UserCenterDialog } from '@/components/user-center-dialog';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { AuthDialog } from '@/components/auth-dialog';
 
 const STORAGE_KEY = 'career_chat_history_v1';
 const PLAN_STORAGE_KEY = 'career_plan_v1';
 const REPORT_STORAGE_KEY = 'career_report_v1';
+
+// Helper to find last "Continue Chat" index
+const getLastContinueIndex = (msgs: any[]) => {
+  for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i];
+      if (m.role === 'user' && m.content && m.content.includes('我想继续聊聊')) {
+          return i;
+      }
+  }
+  return -1;
+};
 
 function GenerationLoading({ currentStep }: { currentStep: string }) {
   const [progress, setProgress] = useState(0);
@@ -67,8 +78,10 @@ function GenerationLoading({ currentStep }: { currentStep: string }) {
 export default function ChatPage() {
   const [planData, setPlanData] = useState(null);
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const urlId = searchParams.get('id');
+  const isNewChatRequested = searchParams.get('new') === 'true';
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
-  const [isUserCenterOpen, setIsUserCenterOpen] = useState(false);
   
   // Sync messages to Supabase when a turn finishes
   const handleFinish = async (message: any) => {
@@ -148,7 +161,7 @@ export default function ChatPage() {
     }
   };
 
-  const { messages, input, handleInputChange, handleSubmit, isLoading, error, setMessages } = useChat({
+  const { messages, input, setInput, append, handleInputChange, handleSubmit, isLoading, error, setMessages } = useChat({
     api: '/api/chat',
     body: {
       planContext: planData
@@ -160,6 +173,48 @@ export default function ChatPage() {
         content: "你好。我是这里的倾听者，也是你的天赋挖掘者。我想通过对话，帮你发现你可能忽略的职业优势。今天你的职业状态感觉如何？",
       }
     ],
+    onResponse: async (response) => {
+        // As soon as we get a response start, save user message if needed
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        let conversationId = currentConversationId;
+        
+        // If logged in but no conversation ID yet, create one immediately
+        if (user && !conversationId) {
+            const { data: conv, error: convError } = await supabase
+                .from('conversations')
+                .insert({ user_id: user.id, title: '新对话' })
+                .select()
+                .single();
+            
+            if (!convError && conv) {
+                conversationId = conv.id;
+                setCurrentConversationId(conv.id);
+                
+                // Sync all messages so far
+                const allMsgs = [...messages];
+                for (const m of allMsgs) {
+                    if (m.id === 'welcome') continue;
+                    await supabase.from('messages').insert({
+                        conversation_id: conv.id,
+                        role: m.role,
+                        content: m.content
+                    });
+                }
+            }
+        }
+
+        if (user && conversationId) {
+            const lastUserMsg = messages[messages.length - 1];
+            if (lastUserMsg && lastUserMsg.role === 'user') {
+                await supabase.from('messages').insert({
+                    conversation_id: conversationId,
+                    role: 'user',
+                    content: lastUserMsg.content
+                });
+            }
+        }
+    },
     onFinish: handleFinish,
     onError: (err) => {
         console.error('Chat error:', err);
@@ -173,6 +228,85 @@ export default function ChatPage() {
   const [loadingStep, setLoadingStep] = useState<string>('');
   const [showPlan, setShowPlan] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [showAuth, setShowAuth] = useState(false);
+  const [pendingAction, setPendingAction] = useState<'new_chat' | 'report' | null>(null);
+
+  // Handle URL ID change
+  useEffect(() => {
+    if (urlId && urlId !== currentConversationId) {
+        handleSelectConversation(urlId);
+    }
+  }, [urlId]);
+
+  // Sidebar Actions
+  const handleSelectConversation = async (id: string) => {
+      setCurrentConversationId(id);
+      // Fetch messages from Supabase
+      try {
+          const { data, error } = await supabase
+            .from('messages')
+            .select('*')
+            .eq('conversation_id', id)
+            .order('created_at', { ascending: true });
+            
+          if (data) {
+              setMessages(data.map(m => ({
+                  id: m.id,
+                  role: m.role as any,
+                  content: m.content
+              })));
+          }
+      } catch (err) {
+          console.error('Failed to load conversation', err);
+      }
+  };
+
+  const handleNewChat = async () => {
+      // 1. Check auth for new chat if we have many anonymous conversations
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+          const savedHistory = localStorage.getItem('career_conversations_meta');
+          const conversations = savedHistory ? JSON.parse(savedHistory) : [];
+          // Limit to 2 anonymous conversations before requiring login
+          if (conversations.length >= 2) {
+              setPendingAction('new_chat');
+              setShowAuth(true);
+              return;
+          }
+      }
+
+      // 2. If there's an ongoing chat, try to generate a final summary for it before clearing
+      if (currentConversationId && messages.length > 2) {
+          fetch('/api/summarize', {
+              method: 'POST',
+              body: JSON.stringify({ messages })
+          })
+          .then(res => res.json())
+          .then(data => {
+              if (data.title) {
+                  supabase.from('conversations')
+                      .update({ title: data.title })
+                      .eq('id', currentConversationId)
+                      .then(({ error }) => {
+                          if (error) console.error('Failed to update final title', error);
+                      });
+              }
+          })
+          .catch(err => console.error('Failed to generate final summary', err));
+      }
+      
+      // 3. Clear state
+      setCurrentConversationId(null);
+      setMessages([
+        {
+          id: 'welcome',
+          role: 'assistant',
+          content: "你好。我是这里的倾听者，也是你的天赋挖掘者。我想通过对话，帮你发现你可能忽略的职业优势。今天你的职业状态感觉如何？",
+        }
+      ]);
+      // Remove URL params
+      router.push('/chat');
+  };
 
   // Auto-resize textarea
   useEffect(() => {
@@ -184,34 +318,82 @@ export default function ChatPage() {
 
   // Load history and plan on mount (Local Storage Fallback)
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    const savedPlan = localStorage.getItem(PLAN_STORAGE_KEY);
-    
-    if (saved && !currentConversationId) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (parsed.length > 0) {
-          setMessages(parsed);
+    const loadLastConversation = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      // Clear URL param after loading if it was provided
+      const handleLoaded = () => {
+          setIsLoaded(true);
+      };
+
+      if (user) {
+        // If a new chat is explicitly requested, skip loading the last one and reset UI
+        if (isNewChatRequested) {
+            setCurrentConversationId(null);
+            setMessages([
+              {
+                id: 'welcome',
+                role: 'assistant',
+                content: "你好。我是这里的倾听者，也是你的天赋挖掘者。我想通过对话，帮你发现你可能忽略的职业优势。今天你的职业状态感觉如何？",
+              }
+            ]);
+            handleLoaded();
+            return;
         }
-      } catch (e) {
-        console.error('Failed to parse chat history', e);
+
+        // If we have a URL ID, prioritize it
+        if (urlId) {
+            await handleSelectConversation(urlId);
+            handleLoaded();
+            return;
+        }
+
+        // Otherwise, fetch the latest conversation
+        const { data: conversations, error } = await supabase
+          .from('conversations')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(1);
+        
+        if (conversations && conversations.length > 0) {
+          await handleSelectConversation(conversations[0].id);
+          handleLoaded();
+          return;
+        }
       }
-    }
-    
-    if (savedPlan) {
-      try {
-        setPlanData(JSON.parse(savedPlan));
-      } catch (e) {
-        console.error('Failed to parse plan data', e);
+
+      // Fallback to local storage
+      const saved = localStorage.getItem(STORAGE_KEY);
+      const savedPlan = localStorage.getItem(PLAN_STORAGE_KEY);
+      
+      if (saved && !currentConversationId) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (parsed.length > 0) {
+            setMessages(parsed);
+          }
+        } catch (e) {
+          console.error('Failed to parse chat history', e);
+        }
       }
-    }
-    
-    setIsLoaded(true);
-  }, [setMessages, currentConversationId]);
+      
+      if (savedPlan) {
+        try {
+          setPlanData(JSON.parse(savedPlan));
+        } catch (e) {
+          console.error('Failed to parse plan data', e);
+        }
+      }
+      handleLoaded();
+    };
+
+    loadLastConversation();
+  }, [setMessages]); // Removed currentConversationId to prevent loops
 
   // Save history on update (Local Storage Fallback)
   useEffect(() => {
-    if (isLoaded && messages.length > 0 && !currentConversationId) {
+    // Only save if it's a local chat (no currentConversationId) and there's actually a conversation going on (more than 1 message)
+    if (isLoaded && messages.length > 1 && !currentConversationId) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
     }
   }, [messages, isLoaded, currentConversationId]);
@@ -223,14 +405,6 @@ export default function ChatPage() {
     }
   }, [planData, isLoaded]);
 
-  const clearHistory = () => {
-    if (confirm('确定要清空所有对话记录和计划吗？这无法撤销。')) {
-      localStorage.removeItem(STORAGE_KEY);
-      localStorage.removeItem(PLAN_STORAGE_KEY);
-      window.location.reload();
-    }
-  };
-
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollIntoView({ behavior: 'smooth' });
@@ -241,9 +415,22 @@ export default function ChatPage() {
     if (lastMessage?.toolInvocations?.some((tool: any) => tool.toolName === 'enableReportButton')) {
       setShowReportButton(true);
     }
-  }, [messages]);
+
+    // Force show report button after 10 messages as a fallback
+    if (messages.length >= 10 && !showReportButton) {
+      setShowReportButton(true);
+    }
+  }, [messages, showReportButton]);
 
   const handleGenerateReport = async () => {
+    // Check auth before report generation
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+        setPendingAction('report');
+        setShowAuth(true);
+        return;
+    }
+
     setIsGeneratingReport(true);
     
     const steps = [
@@ -286,54 +473,14 @@ export default function ChatPage() {
     }
   };
 
-  // Sidebar Actions
-  const handleSelectConversation = async (id: string) => {
-      setCurrentConversationId(id);
-      // Fetch messages from Supabase
-      try {
-          const { data, error } = await supabase
-            .from('messages')
-            .select('*')
-            .eq('conversation_id', id)
-            .order('created_at', { ascending: true });
-            
-          if (data) {
-              setMessages(data.map(m => ({
-                  id: m.id,
-                  role: m.role as any,
-                  content: m.content
-              })));
-          }
-      } catch (err) {
-          console.error('Failed to load conversation', err);
-      }
-      // Close user center after selection
-      setIsUserCenterOpen(false);
-  };
-
-  const handleNewChat = () => {
-      setCurrentConversationId(null);
-      setMessages([
-        {
-          id: 'welcome',
-          role: 'assistant',
-          content: "你好。我是这里的倾听者，也是你的天赋挖掘者。我想通过对话，帮你发现你可能忽略的职业优势。今天你的职业状态感觉如何？",
-        }
-      ]);
-      // Close user center
-      setIsUserCenterOpen(false);
-  };
+  // Logic for bottom decision buttons:
+  // Hide if "Continue Chat" was recently clicked (within 20 messages)
+  const lastContinueIndex = getLastContinueIndex(messages);
+  const continueThreshold = lastContinueIndex === -1 ? 0 : (lastContinueIndex + 20);
+  const showBottomButtons = showReportButton && messages.length >= continueThreshold;
 
   return (
     <div className="flex h-[100dvh] w-full bg-background overflow-hidden">
-        <UserCenterDialog 
-            currentConversationId={currentConversationId}
-            onSelectConversation={handleSelectConversation}
-            onNewChat={handleNewChat}
-            isOpen={isUserCenterOpen}
-            onClose={() => setIsUserCenterOpen(false)}
-        />
-
         {/* Main Content Area */}
         <main className={cn(
             "flex-1 flex flex-col h-full relative transition-all duration-300",
@@ -358,19 +505,20 @@ export default function ChatPage() {
                 <div className="flex items-center gap-3">
                     <div className="flex flex-col">
                         <h1 className="text-lg font-medium tracking-tight text-foreground/80">EchoTalent</h1>
-                        <span className="text-[10px] text-muted-foreground tracking-widest uppercase opacity-70">v4.2 newbrand</span>
+                        <span className="text-[10px] text-muted-foreground tracking-widest uppercase opacity-70">v4.2 gentle breeze</span>
                     </div>
                 </div>
                 <div className="flex items-center gap-1.5 sm:gap-2">
-                    <Button
+                    {/* New Chat Button Hidden as per request */}
+                    {/* <Button
                         variant="ghost"
                         size="icon"
-                        onClick={clearHistory}
-                        title="清空记录"
-                        className="text-muted-foreground hover:text-red-500 hover:bg-white/50 rounded-full transition-colors w-8 h-8 sm:w-9 sm:h-9"
+                        onClick={handleNewChat}
+                        title="开启新对话"
+                        className="text-muted-foreground hover:text-primary hover:bg-white/50 rounded-full transition-colors w-8 h-8 sm:w-9 sm:h-9"
                     >
-                        <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                    </Button>
+                        <MessageSquarePlus className="w-4 h-4 sm:w-5 sm:h-5" />
+                    </Button> */}
                     
                     {planData && (
                     <Button
@@ -404,7 +552,7 @@ export default function ChatPage() {
                     <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => setIsUserCenterOpen(true)}
+                        onClick={() => router.push('/user')}
                         className="rounded-full w-8 h-8 sm:w-9 sm:h-9 bg-secondary/10 hover:bg-secondary/20 ml-0.5 sm:ml-1 border border-white/20"
                         title="用户中心"
                     >
@@ -451,6 +599,42 @@ export default function ChatPage() {
                         </div>
                     </div>
                 )}
+                
+                {/* Decision Buttons: Continue vs Report */}
+                {showBottomButtons && !isLoading && (
+                  <div className="flex justify-center w-full animate-in fade-in slide-in-from-bottom-4 duration-700 py-4">
+                    <div className="flex gap-2 sm:gap-4 items-center bg-white/60 backdrop-blur-xl p-1.5 sm:p-2 rounded-2xl border border-white/40 shadow-xl shadow-primary/5">
+                      <Button
+                        variant="ghost"
+                        className="rounded-xl hover:bg-white/80 text-foreground/80 border border-transparent hover:border-white/40 transition-all text-sm px-3"
+                        onClick={() => {
+                            // User wants to continue chatting
+                            append({
+                                role: 'user',
+                                content: '我想继续聊聊，还有些细节想补充。'
+                            });
+                        }}
+                      >
+                        <MessageSquarePlus className="w-4 h-4 mr-2 text-primary/70" />
+                        继续聊聊
+                      </Button>
+                      <div className="w-px h-6 bg-border/50"></div>
+                      <Button
+                        className="rounded-xl bg-gradient-to-r from-primary to-orange-400 text-white shadow-md hover:shadow-lg hover:scale-105 transition-all text-sm px-4"
+                        onClick={handleGenerateReport}
+                        disabled={isGeneratingReport}
+                      >
+                        {isGeneratingReport ? (
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        ) : (
+                            <Sparkles className="w-4 h-4 mr-2" />
+                        )}
+                        生成报告
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
                 <div ref={scrollRef} />
             </div>
 
@@ -487,6 +671,23 @@ export default function ChatPage() {
             </div>
             </div>
         </main>
+        
+        <AuthDialog 
+            isOpen={showAuth} 
+            onClose={() => {
+                setShowAuth(false);
+                setPendingAction(null);
+            }}
+            onAuthSuccess={() => {
+                setShowAuth(false);
+                if (pendingAction === 'new_chat') {
+                    handleNewChat();
+                } else if (pendingAction === 'report') {
+                    handleGenerateReport();
+                }
+                setPendingAction(null);
+            }}
+        />
     </div>
   );
 }
