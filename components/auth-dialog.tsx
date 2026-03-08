@@ -65,6 +65,8 @@ export function AuthDialog({ isOpen, onClose, onAuthSuccess }: AuthDialogProps) 
       // 2. If Sign In failed, check if it's a credential issue
       // If so, try to Sign Up (assuming user might be new)
       if (signInError) {
+        console.log('Sign in failed:', signInError.message);
+        
         // If error indicates invalid credentials, we assume they might want to register
         // BUT we must differentiate between "Wrong Password" and "User Not Found"
         // Supabase often returns "Invalid login credentials" for both.
@@ -80,11 +82,19 @@ export function AuthDialog({ isOpen, onClose, onAuthSuccess }: AuthDialogProps) 
         });
 
         if (signUpError) {
+          console.log('Sign up failed:', signUpError.message);
+          
           // If Sign Up also fails, check if it's because user already exists
           // If user exists AND sign-in failed, it means WRONG PASSWORD
           if (signUpError.message.includes('User already registered') || signUpError.message.includes('already registered')) {
             throw new Error('用户已存在，但密码错误。请重试或重置密码。'); 
           }
+          
+          // Handle Network Error explicitly (Supabase specific)
+          if (signUpError.message.includes('Network request failed') || signUpError.message.includes('fetch failed')) {
+             throw new Error('网络连接失败，请检查您的网络设置（可能需要科学上网）');
+          }
+
           // If it's a different error (e.g. rate limit, invalid email), throw it
           throw signUpError;
         }
