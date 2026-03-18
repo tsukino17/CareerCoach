@@ -622,7 +622,7 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
                 <div className="flex items-center gap-3">
                     <div className="flex flex-col">
                         <h1 className="text-lg font-medium tracking-tight text-foreground/80">EchoTalent</h1>
-                        <span className="text-[10px] text-muted-foreground tracking-widest uppercase opacity-70">v4.2 gentle breeze</span>
+                        <span className="text-[10px] text-muted-foreground tracking-widest uppercase opacity-70">v4.5 sharing</span>
                     </div>
                 </div>
                 <div className="flex items-center gap-1.5 sm:gap-2">
