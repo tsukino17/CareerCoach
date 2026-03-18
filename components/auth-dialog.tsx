@@ -92,7 +92,7 @@ export function AuthDialog({ isOpen, onClose, onAuthSuccess }: AuthDialogProps) 
           
           // Handle Network Error explicitly (Supabase specific)
           if (signUpError.message.includes('Network request failed') || signUpError.message.includes('fetch failed')) {
-             throw new Error('网络连接失败，请检查您的网络设置（可能需要科学上网）');
+             throw new Error('网络连接失败，请检查您的网络设置');
           }
 
           // If it's a different error (e.g. rate limit, invalid email), throw it

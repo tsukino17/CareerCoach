@@ -25,7 +25,11 @@ const Dialog = ({ children, open, onOpenChange }: DialogProps) => {
 }
 
 // DialogTrigger - Placeholder for compatibility, though not used in controlled mode
-const DialogTrigger = ({ children, asChild, ...props }: any) => {
+type DialogTriggerProps = React.HTMLAttributes<HTMLElement> & {
+  children: React.ReactElement<{ onClick?: React.MouseEventHandler<HTMLElement> }>;
+};
+
+const DialogTrigger = ({ children, ...props }: DialogTriggerProps) => {
   const { onOpenChange } = React.useContext(DialogContext);
   return React.cloneElement(children, {
     onClick: () => onOpenChange?.(true),
