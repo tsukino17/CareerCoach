@@ -5,7 +5,7 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function sanitizeResponseContent(data: any): any {
+export function sanitizeResponseContent<T>(data: T): T {
   if (typeof data === 'string') {
     // 1. Replace pairs of single quotes with Chinese double quotes
     let text = data.replace(/'([^']*)'/g, '“$1”');
@@ -18,21 +18,21 @@ export function sanitizeResponseContent(data: any): any {
     // Common Chinese punctuation: ，。、：；？！
     text = text.replace(/”([^\s，。、：；？！])/g, '” $1');
     
-    return text;
+    return text as unknown as T;
   }
 
   if (Array.isArray(data)) {
-    return data.map(item => sanitizeResponseContent(item));
+    return data.map((item) => sanitizeResponseContent(item)) as unknown as T;
   }
 
   if (typeof data === 'object' && data !== null) {
-    const result: any = {};
-    for (const key in data) {
-      result[key] = sanitizeResponseContent(data[key]);
+    const input = data as Record<string, unknown>;
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(input)) {
+      result[key] = sanitizeResponseContent(value);
     }
-    return result;
+    return result as unknown as T;
   }
 
   return data;
 }
-

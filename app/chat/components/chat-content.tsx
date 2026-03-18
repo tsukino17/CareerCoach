@@ -83,12 +83,24 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
   const [planData, setPlanData] = useState(null);
   const router = useRouter();
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
+
+  const safeGetUser = async (): Promise<any | null> => {
+    try {
+      const timeout = new Promise<{ data: { user: any | null } }>((resolve) =>
+        setTimeout(() => resolve({ data: { user: null } }), 400)
+      );
+      const res = await Promise.race([supabase.auth.getUser(), timeout]);
+      return res.data.user;
+    } catch {
+      return null;
+    }
+  };
   
   // Sync messages to Supabase when a turn finishes
   const handleFinish = async (message: any) => {
     try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return; // Skip if not logged in
+        const user = await safeGetUser();
+        if (!user) return;
 
         let conversationId = currentConversationId;
 
@@ -174,46 +186,48 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
         content: "你好。我是这里的倾听者，也是你的天赋挖掘者。我想通过对话，帮你发现你可能忽略的职业优势。今天你的职业状态感觉如何？",
       }
     ],
-    onResponse: async (response) => {
-        // As soon as we get a response start, save user message if needed
-        const { data: { user } } = await supabase.auth.getUser();
-        
-        let conversationId = currentConversationId;
-        
-        // If logged in but no conversation ID yet, create one immediately
-        if (user && !conversationId) {
-            const { data: conv, error: convError } = await supabase
-                .from('conversations')
-                .insert({ user_id: user.id, title: '新对话' })
-                .select()
-                .single();
+    onResponse: async (_response) => {
+        try {
+            const user = await safeGetUser();
+            if (!user) return;
+
+            let conversationId = currentConversationId;
             
-            if (!convError && conv) {
-                conversationId = conv.id;
-                setCurrentConversationId(conv.id);
+            if (!conversationId) {
+                const { data: conv, error: convError } = await supabase
+                    .from('conversations')
+                    .insert({ user_id: user.id, title: '新对话' })
+                    .select()
+                    .single();
                 
-                // Sync all messages so far
-                const allMsgs = [...messages];
-                for (const m of allMsgs) {
-                    if (m.id === 'welcome') continue;
+                if (!convError && conv) {
+                    conversationId = conv.id;
+                    setCurrentConversationId(conv.id);
+                    
+                    const allMsgs = [...messages];
+                    for (const m of allMsgs) {
+                        if (m.id === 'welcome') continue;
+                        await supabase.from('messages').insert({
+                            conversation_id: conv.id,
+                            role: m.role,
+                            content: m.content
+                        });
+                    }
+                }
+            }
+
+            if (conversationId) {
+                const lastUserMsg = messages[messages.length - 1];
+                if (lastUserMsg && lastUserMsg.role === 'user') {
                     await supabase.from('messages').insert({
-                        conversation_id: conv.id,
-                        role: m.role,
-                        content: m.content
+                        conversation_id: conversationId,
+                        role: 'user',
+                        content: lastUserMsg.content
                     });
                 }
             }
-        }
-
-        if (user && conversationId) {
-            const lastUserMsg = messages[messages.length - 1];
-            if (lastUserMsg && lastUserMsg.role === 'user') {
-                await supabase.from('messages').insert({
-                    conversation_id: conversationId,
-                    role: 'user',
-                    content: lastUserMsg.content
-                });
-            }
+        } catch (err) {
+            console.error('Chat sync error:', err);
         }
     },
     onFinish: handleFinish,
@@ -540,14 +554,27 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
     }, 2500); 
 
     try {
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 60000);
+      const slowHint1 = window.setTimeout(() => setLoadingStep('仍在生成中…如果等待过久可稍后重试'), 18000);
+      const slowHint2 = window.setTimeout(() => setLoadingStep('生成耗时较长…可能网络拥堵，建议稍后重试'), 45000);
+
       const response = await fetch('/api/report', {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages }),
+        signal: controller.signal,
       });
       
+      window.clearTimeout(timeoutId);
+      window.clearTimeout(slowHint1);
+      window.clearTimeout(slowHint2);
       clearInterval(intervalId);
       setLoadingStep('准备就绪！');
       
+      if (!response.ok) {
+        throw new Error('Report generation failed');
+      }
       const data = await response.json();
       try {
         window.localStorage.setItem(REPORT_STORAGE_KEY, JSON.stringify(data));
@@ -558,6 +585,7 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
     } catch (error) {
       clearInterval(intervalId);
       console.error('Failed to generate report:', error);
+      setLoadingStep('生成失败，请稍后重试');
       setIsGeneratingReport(false);
     }
   };
@@ -594,7 +622,7 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
                 <div className="flex items-center gap-3">
                     <div className="flex flex-col">
                         <h1 className="text-lg font-medium tracking-tight text-foreground/80">EchoTalent</h1>
-                        <span className="text-[10px] text-muted-foreground tracking-widest uppercase opacity-70">v4.2 gentle breeze</span>
+                        <span className="text-[10px] text-muted-foreground tracking-widest uppercase opacity-70">v4.5 sharing</span>
                     </div>
                 </div>
                 <div className="flex items-center gap-1.5 sm:gap-2">

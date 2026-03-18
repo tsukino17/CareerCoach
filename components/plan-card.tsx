@@ -1,7 +1,6 @@
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
@@ -33,7 +32,7 @@ interface PlanCardProps {
 }
 
 export function PlanCard({ data, onClose }: PlanCardProps) {
-  const getIcon = (type: string) => {
+  const getIcon = (type: Task["type"]) => {
     switch (type) {
       case 'learning': return <BookOpen className="h-4 w-4 text-blue-500" />;
       case 'connection': return <Users className="h-4 w-4 text-green-500" />;
