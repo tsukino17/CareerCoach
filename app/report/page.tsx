@@ -643,14 +643,14 @@ export default function ReportPage() {
         .filter(Boolean);
       const roles = Array.from(new Set(rawRoles)).slice(0, 5);
       const payload = JSON.stringify({
-        v: 19,
+        v: 20,
         a: data.archetype || '',
         s: buildShareDescription(data.summary || ''),
         p: powers,
         r: roles,
         u: url,
       });
-      return `sharecard-a-v19:${fnv1a(payload)}`;
+      return `sharecard-a-v20:${fnv1a(payload)}`;
     };
 
     const shareCacheRequest = (key: string) =>
@@ -1111,10 +1111,17 @@ export default function ReportPage() {
         const tColor = palette.accents[i % palette.accents.length];
         const dColor = palette.dots[i % palette.dots.length];
 
-        ctx.fillStyle = dColor;
+        ctx.save();
+        if (i === 2) {
+          ctx.fillStyle = palette.accents[i % palette.accents.length];
+          ctx.globalAlpha = 0.32;
+        } else {
+          ctx.fillStyle = dColor;
+        }
         ctx.beginPath();
         ctx.arc(leftX + 42, py - 10, 6, 0, Math.PI * 2);
         ctx.fill();
+        ctx.restore();
         ctx.strokeStyle = 'rgba(255,255,255,0.65)';
         ctx.lineWidth = 2;
         ctx.beginPath();
@@ -1324,6 +1331,38 @@ export default function ReportPage() {
       else window.clearTimeout(id);
     };
   }, [reportArchetype, renderShareImage, shareImgUrl, shareUrl]);
+
+  const handleSaveShareImage = async () => {
+    if (!shareImgUrl) return;
+    try {
+      const res = await fetch(shareImgUrl);
+      const blob = await res.blob();
+      const fileName = 'echotalent-v4.5-sharing.png';
+      const file = new File([blob], fileName, { type: blob.type || 'image/png' });
+
+      const nav = navigator as unknown as {
+        canShare?: (data: { files: File[] }) => boolean;
+        share?: (data: { files: File[]; title?: string; text?: string }) => Promise<void>;
+      };
+
+      if (nav.canShare?.({ files: [file] }) && nav.share) {
+        await nav.share({ files: [file], title: 'EchoTalent', text: '我的职业全景画像' });
+        return;
+      }
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch {
+      const opened = window.open(shareImgUrl, '_blank', 'noopener,noreferrer');
+      if (!opened) window.location.href = shareImgUrl;
+    }
+  };
 
   if (!report) return null;
 
@@ -1557,6 +1596,16 @@ export default function ReportPage() {
                 className="rounded-2xl shadow-2xl pointer-events-auto w-auto h-auto max-w-[92vw] max-h-[88vh]"
               />
             )}
+          </div>
+          <div className="absolute bottom-6 left-0 right-0 z-[120] flex justify-center pointer-events-none px-4">
+            <Button
+              variant="outline"
+              disabled={isRenderingShare || !shareImgUrl}
+              onClick={handleSaveShareImage}
+              className="pointer-events-auto rounded-full bg-white/85 border-black/10 hover:bg-white shadow-lg backdrop-blur"
+            >
+              保存图片
+            </Button>
           </div>
         </div>
       )}
