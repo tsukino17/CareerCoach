@@ -1,25 +1,33 @@
 'use client';
 
 import { useChat } from 'ai/react';
-import { useRef, useEffect, useState } from 'react';
-import { Send, FileText, Loader2, MessageSquarePlus, Calendar, Sparkles, User } from 'lucide-react';
+import { useRef, useEffect, useState, useCallback } from 'react';
+import { Send, FileText, Loader2, MessageSquarePlus, Sparkles, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { PlanCard } from '@/components/plan-card';
 import { MessageRenderer } from '@/components/message-renderer';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { AuthDialog } from '@/components/auth-dialog';
+import type { User as SupabaseUser } from '@supabase/supabase-js';
 
 const STORAGE_KEY = 'career_chat_history_v1';
-const PLAN_STORAGE_KEY = 'career_plan_v1';
 const REPORT_STORAGE_KEY = 'career_report_v1';
 
+type ChatRole = 'user' | 'assistant' | 'system';
+type ChatMessage = {
+  id: string;
+  role: ChatRole;
+  content: string;
+};
+
 // Helper to find last "Continue Chat" index
-const getLastContinueIndex = (msgs: any[]) => {
+const getLastContinueIndex = (msgs: Array<{ role?: unknown; content?: unknown }>) => {
   for (let i = msgs.length - 1; i >= 0; i--) {
       const m = msgs[i];
-      if (m.role === 'user' && m.content && m.content.includes('我想继续聊聊')) {
+      const role = m?.role;
+      const content = m?.content;
+      if (role === 'user' && typeof content === 'string' && content.includes('我想继续聊聊')) {
           return i;
       }
   }
@@ -80,14 +88,13 @@ interface ChatContentProps {
 }
 
 function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
-  const [planData, setPlanData] = useState(null);
   const router = useRouter();
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
 
-  const safeGetUser = async (): Promise<any | null> => {
+  const safeGetUser = async (): Promise<SupabaseUser | null> => {
     try {
-      const timeout = new Promise<{ data: { user: any | null } }>((resolve) =>
-        setTimeout(() => resolve({ data: { user: null } }), 400)
+      const timeout = new Promise<{ data: { user: SupabaseUser | null } }>((resolve) =>
+        window.setTimeout(() => resolve({ data: { user: null } }), 400)
       );
       const res = await Promise.race([supabase.auth.getUser(), timeout]);
       return res.data.user;
@@ -97,12 +104,13 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
   };
   
   // Sync messages to Supabase when a turn finishes
-  const handleFinish = async (message: any) => {
+  const handleFinish = async (message: { content?: string }) => {
     try {
         const user = await safeGetUser();
         if (!user) return;
 
         let conversationId = currentConversationId;
+        const assistantContent = typeof message?.content === 'string' ? message.content : '';
 
         // 1. Create Conversation if needed (First sync)
         if (!conversationId) {
@@ -119,7 +127,10 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
             setCurrentConversationId(conv.id);
 
             // Sync ALL existing messages (migration from local to cloud)
-            const messagesToSync = [...messages, { role: 'assistant', content: message.content } as any];
+            const messagesToSync: Array<{ id?: string; role?: unknown; content?: unknown }> = [
+              ...messages,
+              { id: `assistant-${Date.now()}`, role: 'assistant', content: assistantContent },
+            ];
             
             for (const msg of messagesToSync) {
                 if (msg.id === 'welcome') continue; // Skip default welcome
@@ -166,7 +177,7 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
         await supabase.from('messages').insert({
             conversation_id: conversationId,
             role: 'assistant',
-            content: message.content
+            content: assistantContent
         });
 
     } catch (err) {
@@ -174,11 +185,8 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
     }
   };
 
-  const { messages, input, setInput, append, handleInputChange, handleSubmit, isLoading, error, setMessages } = useChat({
+  const { messages, input, append, handleInputChange, handleSubmit, isLoading, error, setMessages } = useChat({
     api: '/api/chat',
-    body: {
-      planContext: planData
-    },
     initialMessages: [
       {
         id: 'welcome',
@@ -186,7 +194,7 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
         content: "你好。我是这里的倾听者，也是你的天赋挖掘者。我想通过对话，帮你发现你可能忽略的职业优势。今天你的职业状态感觉如何？",
       }
     ],
-    onResponse: async (_response) => {
+    onResponse: async () => {
         try {
             const user = await safeGetUser();
             if (!user) return;
@@ -241,34 +249,68 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
   const [showReportButton, setShowReportButton] = useState(false);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [loadingStep, setLoadingStep] = useState<string>('');
-  const [showPlan, setShowPlan] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
   const [pendingAction, setPendingAction] = useState<'new_chat' | 'report' | null>(null);
+  const [reportNudgeOpen, setReportNudgeOpen] = useState(false);
+  const [reportNudgeNonce, setReportNudgeNonce] = useState(0);
+  const reportNudgeTimeoutsRef = useRef<number[]>([]);
+  const [reportHintQueue, setReportHintQueue] = useState(0);
+  const [uiInserts, setUiInserts] = useState<Array<{ id: string; afterMessageId: string; content: string }>>([]);
 
-  // Handle URL ID change
+  const triggerReportNudge = () => {
+    setReportNudgeNonce((n) => n + 1);
+    setReportNudgeOpen(true);
+    if (typeof window === 'undefined') return;
+    for (const t of reportNudgeTimeoutsRef.current) window.clearTimeout(t);
+    reportNudgeTimeoutsRef.current = [];
+    reportNudgeTimeoutsRef.current.push(
+      window.setTimeout(() => setReportNudgeOpen(false), 550),
+      window.setTimeout(() => {
+        setReportNudgeNonce((n) => n + 1);
+        setReportNudgeOpen(true);
+      }, 900),
+      window.setTimeout(() => setReportNudgeOpen(false), 1550)
+    );
+  };
+
   useEffect(() => {
-    if (urlId && urlId !== currentConversationId) {
-        handleSelectConversation(urlId);
-    }
-  }, [urlId]);
+    return () => {
+      if (typeof window === 'undefined') return;
+      for (const t of reportNudgeTimeoutsRef.current) window.clearTimeout(t);
+      reportNudgeTimeoutsRef.current = [];
+    };
+  }, []);
 
   // Sidebar Actions
-  const handleSelectConversation = async (id: string) => {
+  const handleSelectConversation = useCallback(async (id: string) => {
       setCurrentConversationId(id);
       
       // 1. Try local storage first (for anonymous chats)
       try {
         const savedHistory = localStorage.getItem('career_conversations_meta');
         if (savedHistory) {
-            const conversations = JSON.parse(savedHistory);
-            const localConv = conversations.find((c: any) => c.id === id);
-            if (localConv && localConv.messages) {
-                setMessages(localConv.messages.map((m: any) => ({
-                    id: m.id || Math.random().toString(36).substring(7),
-                    role: m.role,
-                    content: m.content
-                })));
+            const parsed = JSON.parse(savedHistory) as unknown;
+            const conversations = Array.isArray(parsed) ? parsed : [];
+            const localConv = conversations.find((c) => (c as { id?: unknown })?.id === id) as
+              | { messages?: unknown }
+              | undefined;
+            const localMessages = localConv?.messages;
+            if (Array.isArray(localMessages)) {
+                const mapped = localMessages
+                  .map((m) => {
+                    const mm = m as { id?: unknown; role?: unknown; content?: unknown };
+                    const role = mm.role === 'user' || mm.role === 'assistant' || mm.role === 'system' ? mm.role : null;
+                    const content = typeof mm.content === 'string' ? mm.content : null;
+                    if (!role || !content) return null;
+                    const mid =
+                      typeof mm.id === 'string' && mm.id.trim()
+                        ? mm.id
+                        : Math.random().toString(36).substring(7);
+                    return { id: mid, role, content };
+                  })
+                  .filter((m): m is ChatMessage => Boolean(m));
+                if (mapped.length > 0) setMessages(mapped);
                 return; 
             }
         }
@@ -278,23 +320,60 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
 
       // 2. Fetch messages from Supabase
       try {
-          const { data, error } = await supabase
+          const { data, error: queryError } = await supabase
             .from('messages')
             .select('*')
             .eq('conversation_id', id)
             .order('created_at', { ascending: true });
             
+          if (queryError) throw queryError;
           if (data && data.length > 0) {
-              setMessages(data.map(m => ({
-                  id: m.id,
-                  role: m.role as any,
-                  content: m.content
-              })));
+              setMessages(
+                data
+                  .map((m) => {
+                    const mm = m as { id?: unknown; role?: unknown; content?: unknown };
+                    const role = mm.role === 'user' || mm.role === 'assistant' || mm.role === 'system' ? mm.role : null;
+                    const content = typeof mm.content === 'string' ? mm.content : null;
+                    const mid = typeof mm.id === 'string' ? mm.id : null;
+                    if (!role || !content || !mid) return null;
+                    return { id: mid, role, content };
+                  })
+                  .filter((m): m is ChatMessage => Boolean(m))
+              );
           }
       } catch (err) {
           console.error('Failed to load conversation', err);
       }
-  };
+  }, [setMessages]);
+
+  // Handle URL ID change
+  useEffect(() => {
+    if (urlId && urlId !== currentConversationId) {
+      void handleSelectConversation(urlId);
+    }
+  }, [currentConversationId, handleSelectConversation, urlId]);
+
+  useEffect(() => {
+    if (reportHintQueue <= 0) return;
+    const last = messages[messages.length - 1] as { id?: unknown; role?: unknown; content?: unknown } | undefined;
+    const id = typeof last?.id === 'string' ? last.id : null;
+    const role = last?.role;
+    const content = last?.content;
+    if (!id || role !== 'user' || typeof content !== 'string' || !content.includes('我想继续聊聊')) return;
+
+    setUiInserts((prev) => {
+      if (prev.some((x) => x.afterMessageId === id && x.content.includes('点击右上角的报告按钮'))) return prev;
+      return [
+        ...prev,
+        {
+          id: `report-hint-${Date.now()}`,
+          afterMessageId: id,
+          content: '好的，那我们现在就沉浸式地聊一聊，如果你需要查看报告的话，随时可以点击右上角的报告按钮。',
+        },
+      ];
+    });
+    setReportHintQueue((n) => Math.max(0, n - 1));
+  }, [messages, reportHintQueue]);
 
   const handleNewChat = async () => {
       // 1. Check auth for new chat if we have many anonymous conversations
@@ -363,11 +442,9 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
           content: "你好。我是这里的倾听者，也是你的天赋挖掘者。我想通过对话，帮你发现你可能忽略的职业优势。今天你的职业状态感觉如何？",
         }
       ]);
-      setPlanData(null);
       
       // Clear current session storage
       localStorage.removeItem(STORAGE_KEY);
-      localStorage.removeItem(PLAN_STORAGE_KEY);
 
       // Remove URL params
       router.push('/chat');
@@ -403,7 +480,10 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
                          const savedHistory = localStorage.getItem('career_conversations_meta');
                          const conversations = savedHistory ? JSON.parse(savedHistory) : [];
                          
-                         const title = parsedMsgs.find((m: any) => m.role === 'user')?.content.substring(0, 20) || '新对话';
+                         const titleCandidate = (parsedMsgs as Array<{ role?: unknown; content?: unknown }>)
+                           .find((m) => m?.role === 'user' && typeof m?.content === 'string');
+                         const titleText = typeof titleCandidate?.content === 'string' ? titleCandidate.content : '';
+                         const title = titleText ? titleText.substring(0, 20) : '新对话';
                          
                          const newConv = {
                             id: Date.now().toString(),
@@ -421,7 +501,6 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
             }
             // Clear current session
             localStorage.removeItem(STORAGE_KEY);
-            localStorage.removeItem(PLAN_STORAGE_KEY);
             
             // Clean up URL
             router.replace('/chat');
@@ -435,7 +514,6 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
             content: "你好。我是这里的倾听者，也是你的天赋挖掘者。我想通过对话，帮你发现你可能忽略的职业优势。今天你的职业状态感觉如何？",
           }
         ]);
-        setPlanData(null);
         handleLoaded();
         return;
       }
@@ -449,11 +527,12 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
         }
 
         // Otherwise, fetch the latest conversation
-        const { data: conversations, error } = await supabase
+        const { data: conversations, error: queryError } = await supabase
           .from('conversations')
           .select('*')
           .order('created_at', { ascending: false })
           .limit(1);
+        if (queryError) throw queryError;
         
         if (conversations && conversations.length > 0) {
           await handleSelectConversation(conversations[0].id);
@@ -464,7 +543,6 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
 
       // Fallback to local storage
       const saved = localStorage.getItem(STORAGE_KEY);
-      const savedPlan = localStorage.getItem(PLAN_STORAGE_KEY);
       
       if (saved && !currentConversationId) {
         try {
@@ -476,19 +554,11 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
           console.error('Failed to parse chat history', e);
         }
       }
-      
-      if (savedPlan) {
-        try {
-          setPlanData(JSON.parse(savedPlan));
-        } catch (e) {
-          console.error('Failed to parse plan data', e);
-        }
-      }
       handleLoaded();
     };
 
     loadLastConversation();
-  }, [setMessages]); // Removed currentConversationId to prevent loops
+  }, [currentConversationId, handleSelectConversation, isNewChatRequested, router, setMessages, urlId]);
 
   // Save history on update (Local Storage Fallback)
   useEffect(() => {
@@ -498,13 +568,6 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
     }
   }, [messages, isLoaded, currentConversationId]);
 
-  // Save plan on update
-  useEffect(() => {
-    if (isLoaded && planData) {
-      localStorage.setItem(PLAN_STORAGE_KEY, JSON.stringify(planData));
-    }
-  }, [planData, isLoaded]);
-
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollIntoView({ behavior: 'smooth' });
@@ -512,7 +575,11 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
     
     // Check if AI has signaled to enable the report button via tool call
     const lastMessage = messages[messages.length - 1];
-    if (lastMessage?.toolInvocations?.some((tool: any) => tool.toolName === 'enableReportButton')) {
+    const tools = (lastMessage as { toolInvocations?: unknown })?.toolInvocations;
+    if (
+      Array.isArray(tools) &&
+      tools.some((tool) => (tool as { toolName?: unknown })?.toolName === 'enableReportButton')
+    ) {
       setShowReportButton(true);
     }
 
@@ -610,13 +677,6 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
             
             {isGeneratingReport && <GenerationLoading currentStep={loadingStep} />}
 
-            {showPlan && planData && (
-                <PlanCard
-                data={planData}
-                onClose={() => setShowPlan(false)}
-                />
-            )}
-            
             {/* Header */}
             <header className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-white/20 bg-white/40 backdrop-blur-md z-10 sticky top-0 shrink-0">
                 <div className="flex items-center gap-3">
@@ -637,33 +697,32 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
                         <MessageSquarePlus className="w-4 h-4 sm:w-5 sm:h-5" />
                     </Button> */}
                     
-                    {planData && (
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        className="gap-1.5 sm:gap-2 text-primary border-primary/20 hover:bg-primary/10 rounded-full bg-white/50 backdrop-blur-sm shadow-sm px-2.5 sm:px-3 text-xs sm:text-sm"
-                        onClick={() => setShowPlan(true)}
-                    >
-                        <Calendar className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                        <span className="hidden xs:inline">计划</span>
-                    </Button>
-                    )}
-
                     {showReportButton && (
-                    <Button 
-                        variant="outline" 
-                        size="sm" 
-                        className="gap-1.5 sm:gap-2 animate-in fade-in zoom-in duration-500 rounded-full bg-white/50 backdrop-blur-sm border-primary/20 text-primary shadow-sm hover:bg-white/80 px-2.5 sm:px-3 text-xs sm:text-sm"
-                        onClick={handleGenerateReport}
-                        disabled={isGeneratingReport}
-                    >
-                        {isGeneratingReport ? (
-                            <Loader2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-spin" />
-                        ) : (
-                            <FileText className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                        )}
-                        <span className="hidden xs:inline">{isGeneratingReport ? (loadingStep || '分析中...') : '职业报告'}</span>
-                    </Button>
+                    <div className="relative">
+                      {reportNudgeOpen && (
+                        <div
+                          key={`report-nudge-glow-${reportNudgeNonce}`}
+                          className="pointer-events-none absolute -inset-2 rounded-full bg-primary/25 blur-xl animate-pulse"
+                        />
+                      )}
+                      <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className={cn(
+                            "relative z-10 gap-1.5 sm:gap-2 animate-in fade-in zoom-in duration-500 rounded-full bg-white/50 backdrop-blur-sm border-primary/20 text-primary shadow-sm hover:bg-white/80 px-2.5 sm:px-3 text-xs sm:text-sm transition-all",
+                            reportNudgeOpen && "bg-white/80 border-primary/40 ring-2 ring-primary/35 shadow-lg shadow-primary/20"
+                          )}
+                          onClick={handleGenerateReport}
+                          disabled={isGeneratingReport}
+                      >
+                          {isGeneratingReport ? (
+                              <Loader2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-spin" />
+                          ) : (
+                              <FileText className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                          )}
+                          <span className="hidden xs:inline">{isGeneratingReport ? (loadingStep || '分析中...') : '职业报告'}</span>
+                      </Button>
+                    </div>
                     )}
 
                     <Button
@@ -685,28 +744,44 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
                         <span className="font-medium">出错啦：</span> {error.message}
                     </div>
                 )}
-                {messages.map((m) => (
-                <div
-                    key={m.id}
-                    className={cn(
-                    "flex w-full animate-in fade-in slide-in-from-bottom-2 duration-300",
-                    m.role === 'user' ? "justify-end" : "justify-start"
-                    )}
-                >
-                    <div
-                    className={cn(
-                        "flex max-w-[85%] flex-col gap-2 px-5 py-4 text-sm shadow-sm transition-all hover:shadow-md",
-                        m.role === 'user'
-                        ? "bg-gradient-to-br from-primary to-[#ffbca0] text-white rounded-2xl rounded-br-sm"
-                        : "glass text-foreground/90 rounded-2xl rounded-bl-sm border-white/40"
-                    )}
-                    >
-                    <div className="leading-relaxed">
-                        <MessageRenderer content={m.content} role={m.role as any} />
+                {messages.map((m) => {
+                  const inserts = uiInserts.filter((x) => x.afterMessageId === m.id);
+                  return (
+                    <div key={m.id} className="space-y-3">
+                      <div
+                        className={cn(
+                          "flex w-full animate-in fade-in slide-in-from-bottom-2 duration-300",
+                          m.role === 'user' ? "justify-end" : "justify-start"
+                        )}
+                      >
+                        <div
+                          className={cn(
+                            "flex max-w-[85%] flex-col gap-2 px-5 py-4 text-sm shadow-sm transition-all hover:shadow-md",
+                            m.role === 'user'
+                              ? "bg-gradient-to-br from-primary to-[#ffbca0] text-white rounded-2xl rounded-br-sm"
+                              : "glass text-foreground/90 rounded-2xl rounded-bl-sm border-white/40"
+                          )}
+                        >
+                          <div className="leading-relaxed">
+                            <MessageRenderer content={m.content} role={m.role} />
+                          </div>
+                        </div>
+                      </div>
+                      {inserts.map((x) => (
+                        <div
+                          key={x.id}
+                          className={cn("flex w-full animate-in fade-in slide-in-from-bottom-2 duration-300", "justify-start")}
+                        >
+                          <div className="flex max-w-[85%] flex-col gap-2 px-5 py-4 text-sm shadow-sm transition-all hover:shadow-md glass text-foreground/90 rounded-2xl rounded-bl-sm border-white/40">
+                            <div className="leading-relaxed">
+                              <MessageRenderer content={x.content} role="assistant" />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                    </div>
-                </div>
-                ))}
+                  );
+                })}
                 {isLoading && (
                     <div className="flex justify-start w-full animate-pulse">
                         <div className="glass text-foreground/80 rounded-2xl rounded-bl-sm px-5 py-4 text-sm shadow-sm flex items-center gap-2 border-white/40">
@@ -725,7 +800,8 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
                         variant="ghost"
                         className="rounded-xl hover:bg-white/80 text-foreground/80 border border-transparent hover:border-white/40 transition-all text-sm px-3"
                         onClick={() => {
-                            // User wants to continue chatting
+                            triggerReportNudge();
+                            setReportHintQueue((n) => n + 1);
                             append({
                                 role: 'user',
                                 content: '我想继续聊聊，还有些细节想补充。'
@@ -767,7 +843,7 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
                         if (e.key === 'Enter' && !e.shiftKey) {
                             e.preventDefault();
                             if (input.trim() && !isLoading) {
-                                handleSubmit(e as any);
+                                handleSubmit(e as unknown as React.FormEvent<HTMLFormElement>);
                             }
                         }
                     }}

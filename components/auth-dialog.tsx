@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { X, Loader2, Mail, Lock } from 'lucide-react';
-import { cn } from '@/lib/utils';
 
 interface AuthDialogProps {
   isOpen: boolean;
@@ -26,7 +25,7 @@ export function AuthDialog({ isOpen, onClose, onAuthSuccess }: AuthDialogProps) 
         interval = setInterval(async () => {
             // Check if user has verified email (by trying to sign in silently or checking session)
             // Strategy: Since we have the password in state, we can try to sign in in background
-            const { data, error } = await supabase.auth.signInWithPassword({
+            const { data } = await supabase.auth.signInWithPassword({
                 email,
                 password
             });
@@ -112,9 +111,10 @@ export function AuthDialog({ isOpen, onClose, onAuthSuccess }: AuthDialogProps) 
       }
 
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Auth flow error:', err);
-      setError(err.message || 'Authentication failed');
+      const message = err instanceof Error ? err.message : 'Authentication failed';
+      setError(message);
     } finally {
       setLoading(false);
     }

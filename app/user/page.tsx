@@ -3,11 +3,11 @@
 import { useEffect, useState } from 'react';
 import { MessageSquare, Trash2, Calendar, FileText, LogOut, User, ChevronLeft, Loader2, Download, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
 import { AuthDialog } from '@/components/auth-dialog';
 import { Badge } from '@/components/ui/badge';
 import { useRouter } from 'next/navigation';
+import type { User as SupabaseUser } from '@supabase/supabase-js';
 
 interface Conversation {
   id: string;
@@ -15,13 +15,17 @@ interface Conversation {
   created_at: string;
 }
 
+interface ConversationItem extends Conversation {
+  messages?: unknown;
+}
+
 export default function UserCenterPage() {
-  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<SupabaseUser | null>(null);
   const [activeTab, setActiveTab] = useState<'history' | 'reports' | 'plan'>('history');
   const [showAuth, setShowAuth] = useState(false);
-  const [localReport, setLocalReport] = useState<any>(null);
+  const [localReport, setLocalReport] = useState<unknown | null>(null);
   
   const router = useRouter();
 
@@ -43,7 +47,7 @@ export default function UserCenterPage() {
     });
   }, []);
 
-  async function fetchConversations(currentUser?: any) {
+  async function fetchConversations(currentUser?: SupabaseUser | null) {
     setLoading(true);
     try {
       const targetUser = currentUser; // Use passed user or state
@@ -55,12 +59,41 @@ export default function UserCenterPage() {
             .order('created_at', { ascending: false });
 
         if (error) throw error;
-        if (data) setConversations(data);
+        if (Array.isArray(data)) {
+          setConversations(
+            data
+              .map((row) => {
+                const r = row as { id?: unknown; title?: unknown; created_at?: unknown };
+                const id = typeof r.id === 'string' ? r.id : null;
+                if (!id) return null;
+                return {
+                  id,
+                  title: typeof r.title === 'string' ? r.title : '对话',
+                  created_at: typeof r.created_at === 'string' ? r.created_at : new Date().toISOString(),
+                };
+              })
+              .filter((c): c is Conversation => Boolean(c))
+          );
+        }
       } else {
         // Load local conversations
         const savedHistory = localStorage.getItem('career_conversations_meta');
         if (savedHistory) {
-            setConversations(JSON.parse(savedHistory));
+            const parsed = JSON.parse(savedHistory) as unknown;
+            const list = Array.isArray(parsed) ? parsed : [];
+            const mapped: ConversationItem[] = [];
+            for (const row of list) {
+              const r = row as { id?: unknown; title?: unknown; created_at?: unknown; messages?: unknown };
+              const id = typeof r.id === 'string' ? r.id : null;
+              if (!id) continue;
+              mapped.push({
+                id,
+                title: typeof r.title === 'string' ? r.title : '对话',
+                created_at: typeof r.created_at === 'string' ? r.created_at : new Date().toISOString(),
+                messages: r.messages,
+              });
+            }
+            setConversations(mapped);
         }
       }
     } catch (error) {
@@ -82,10 +115,23 @@ export default function UserCenterPage() {
         // Local delete
         const savedHistory = localStorage.getItem('career_conversations_meta');
         if (savedHistory) {
-            const list = JSON.parse(savedHistory);
-            const newList = list.filter((c: any) => c.id !== id);
+            const parsed = JSON.parse(savedHistory) as unknown;
+            const list = Array.isArray(parsed) ? parsed : [];
+            const newList = list.filter((c) => (c as { id?: unknown })?.id !== id);
             localStorage.setItem('career_conversations_meta', JSON.stringify(newList));
-            setConversations(newList);
+            const mapped: ConversationItem[] = [];
+            for (const row of newList) {
+              const r = row as { id?: unknown; title?: unknown; created_at?: unknown; messages?: unknown };
+              const cid = typeof r.id === 'string' ? r.id : null;
+              if (!cid) continue;
+              mapped.push({
+                id: cid,
+                title: typeof r.title === 'string' ? r.title : '对话',
+                created_at: typeof r.created_at === 'string' ? r.created_at : new Date().toISOString(),
+                messages: r.messages,
+              });
+            }
+            setConversations(mapped);
         }
       }
     } catch (error) {
@@ -93,7 +139,7 @@ export default function UserCenterPage() {
     }
   }
 
-  async function exportConversation(e: React.MouseEvent, conversation: Conversation) {
+  async function exportConversation(e: React.MouseEvent, conversation: Conversation & { messages?: unknown }) {
     e.stopPropagation();
     // Temporarily disabled auth check
     /*
@@ -104,7 +150,7 @@ export default function UserCenterPage() {
     */
 
     try {
-        let messages: any[] = [];
+        let messages: Array<{ role?: unknown; content?: unknown }> = [];
         
         if (user) {
             const { data, error } = await supabase
@@ -114,25 +160,34 @@ export default function UserCenterPage() {
                 .order('created_at', { ascending: true });
 
             if (error) throw error;
-            messages = data || [];
+            messages = Array.isArray(data) ? (data as Array<{ role?: unknown; content?: unknown }>) : [];
         } else {
             // Local export
             // Try to find in the conversation object itself (if it has messages) or localStorage
-            if ((conversation as any).messages) {
-                messages = (conversation as any).messages;
+            if (Array.isArray(conversation.messages)) {
+                messages = conversation.messages as Array<{ role?: unknown; content?: unknown }>;
             } else {
                 const savedHistory = localStorage.getItem('career_conversations_meta');
                 if (savedHistory) {
-                    const list = JSON.parse(savedHistory);
-                    const found = list.find((c: any) => c.id === conversation.id);
-                    if (found) messages = found.messages || [];
+                    const parsed = JSON.parse(savedHistory) as unknown;
+                    const list = Array.isArray(parsed) ? parsed : [];
+                    const found = list.find((c) => (c as { id?: unknown })?.id === conversation.id) as
+                      | { messages?: unknown }
+                      | undefined;
+                    if (Array.isArray(found?.messages)) {
+                      messages = found?.messages as Array<{ role?: unknown; content?: unknown }>;
+                    }
                 }
             }
         }
 
-        const exportText = messages.map(m => 
-            `${m.role === 'user' ? '我' : 'AI'}: ${m.content}`
-        ).join('\n\n');
+        const exportText = messages
+          .map((m) => {
+            const role = m?.role === 'user' ? '我' : 'AI';
+            const content = typeof m?.content === 'string' ? m.content : '';
+            return `${role}: ${content}`;
+          })
+          .join('\n\n');
 
         const blob = new Blob([exportText], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
@@ -154,45 +209,6 @@ export default function UserCenterPage() {
     setUser(null);
     setConversations([]);
     router.push('/chat'); // Redirect to chat after logout? Or stay? Maybe stay to show login.
-  };
-
-  const handleDeleteAccount = async () => {
-    if (!confirm('警告：此操作不可恢复！\n确定要永久注销账号并删除所有数据吗？')) return;
-    
-    // Prompt for confirmation again to be safe
-    const email = prompt('请输入您的邮箱地址以确认删除：');
-    if (email !== user?.email) {
-        alert('邮箱不匹配，操作已取消');
-        return;
-    }
-
-    setLoading(true);
-    try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) return;
-
-        const res = await fetch('/api/auth/delete-account', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${session.access_token}`
-            }
-        });
-
-        if (!res.ok) {
-            const data = await res.json();
-            throw new Error(data.error || 'Failed to delete account');
-        }
-
-        // Sign out locally
-        await supabase.auth.signOut();
-        alert('账号已注销');
-        router.push('/chat');
-    } catch (err: any) {
-        console.error('Delete account error:', err);
-        alert('注销失败: ' + err.message);
-    } finally {
-        setLoading(false);
-    }
   };
 
   const handleSelectConversation = (id: string) => {

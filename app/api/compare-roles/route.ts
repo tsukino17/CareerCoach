@@ -28,9 +28,23 @@ const roleComparisonSchema = z.object({
 
 export async function POST(req: Request) {
   try {
-    const { roles, archetype, context } = await req.json();
+    const body = (await req.json()) as unknown;
+    const { roles, archetype, context } = body as {
+      roles?: unknown;
+      archetype?: unknown;
+      context?: unknown;
+    };
 
-    if (!roles || roles.length !== 2) {
+    if (!Array.isArray(roles) || roles.length !== 2) {
+      return new Response(JSON.stringify({ error: 'Exactly two roles are required for comparison' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    const r0 = `${roles[0] ?? ''}`.trim();
+    const r1 = `${roles[1] ?? ''}`.trim();
+    if (!r0 || !r1) {
       return new Response(JSON.stringify({ error: 'Exactly two roles are required for comparison' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
@@ -46,8 +60,8 @@ export async function POST(req: Request) {
     const systemPrompt = GENTLE_BREEZE_V4_REPORT_PROMPT + `
     
     ADDITIONAL INSTRUCTION:
-    Your task is to compare two potential career paths for a user with the archetype "${archetype}".
-    User Context: ${JSON.stringify(context)}
+    Your task is to compare two potential career paths for a user with the archetype "${String(archetype ?? '')}".
+    User Context: ${JSON.stringify(context ?? null)}
     
     Analyze both roles deeply and provide a side-by-side comparison.
     Focus on practical aspects: salary, fit, growth potential, and daily reality.
@@ -59,7 +73,7 @@ export async function POST(req: Request) {
       schema: roleComparisonSchema,
       system: systemPrompt,
       messages: [
-        { role: 'user', content: `Compare the roles of "${roles[0]}" and "${roles[1]}" for me.` }
+        { role: 'user', content: `Compare the roles of "${r0}" and "${r1}" for me.` }
       ],
       mode: 'json',
     });
@@ -69,9 +83,10 @@ export async function POST(req: Request) {
     return new Response(JSON.stringify(sanitizedObject), {
       headers: { 'Content-Type': 'application/json' },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Role Comparison Error:', error);
-    return new Response(JSON.stringify({ error: 'Failed to compare roles', details: error.message }), {
+    const details = error instanceof Error ? error.message : 'Unknown error';
+    return new Response(JSON.stringify({ error: 'Failed to compare roles', details }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' },
     });

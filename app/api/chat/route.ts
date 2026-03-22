@@ -9,7 +9,30 @@ export const preferredRegion = ['hkg1', 'sin1', 'iad1']; // Prioritize Asia regi
 
 export async function POST(req: Request) {
   try {
-    const { messages, planContext } = await req.json();
+    const { messages } = (await req.json()) as { messages?: unknown };
+    if (!Array.isArray(messages)) {
+      return new Response(JSON.stringify({ error: 'Invalid messages' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    type ChatMessage = { role: 'user' | 'assistant' | 'system'; content: string };
+    const chatMessages: ChatMessage[] = messages
+      .map((m) => {
+        const mm = m as { role?: unknown; content?: unknown };
+        const role = mm.role === 'user' || mm.role === 'assistant' || mm.role === 'system' ? mm.role : null;
+        const content = typeof mm.content === 'string' ? mm.content : null;
+        if (!role || !content) return null;
+        return { role, content };
+      })
+      .filter((m): m is ChatMessage => Boolean(m));
+    if (chatMessages.length === 0) {
+      return new Response(JSON.stringify({ error: 'Invalid messages' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
 
     const openai = createOpenAI({
       baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
@@ -17,51 +40,18 @@ export async function POST(req: Request) {
     });
 
     let systemPrompt = GENTLE_BREEZE_V4_CHAT_PROMPT;
-
-    // INJECT PLAN CONTEXT IF AVAILABLE (Long-term Memory)
-    if (planContext) {
-      systemPrompt = `
-      You are "EchoTalent", now acting as a Career Execution Coach.
-      
-      You have already helped the user generate a career transition plan.
-      
-      **CURRENT PLAN CONTEXT**:
-      - Goal: ${planContext.goal}
-      - Duration: ${planContext.duration}
-      - Current Focus: The user is likely in the early phases of this plan.
-      
-      **YOUR NEW ROLE**:
-      - Help the user execute this plan.
-      - Answer questions about specific tasks in the plan.
-      - Provide encouragement and accountability.
-      - If they are stuck, suggest smaller steps based on their "Archetype" and "Skills".
-      
-      Keep the tone empathetic but action-oriented.
-      
-      **STYLE GUIDELINES**:
-      - **Tone**: Warm, Encouraging, and Action-Oriented. Use a "Gentle Breeze" approach—supportive but not pushy.
-      - **Natural Dialogue**: Avoid robotic repetition. Use natural transitions and conversational language.
-      - **Professionalism**: Be clear and grounded. Avoid flowery language or excessive drama.
-      - **Emoji Usage**: STRICTLY LIMIT to 0-1 per message. NO emoji bullets.
-      - **Forbidden**: "我想轻轻问一句", "弱弱问一句", "我想确认一下", "啊", Em dashes (——), "Wow/Amazing".
-      - **Questions**: Use diverse openings (e.g., "说起来...", "那当时...", "如果...") or direct questions.
-      
-      IMPORTANT: Communicate in Simplified Chinese (简体中文).
-      `;
-    } else {
-      systemPrompt += `
+    systemPrompt += `
       **Tools**:
       - You have access to a "getSalaryInsight" tool. If the user asks about salary trends or market rates for a specific role and city, USE THIS TOOL to get data, then incorporate the findings into your empathetic response. Do not make up numbers if you can use the tool.
       - You have access to a "enableReportButton" tool. Call this tool simultaneously when you ask the user if they want to generate the report.
       
-      Start by welcoming them if it's the start (though the UI handles the welcome message usually, be ready to continue).
-      `;
-    }
+      Start by welcoming them if it's a fresh conversation (though the UI may show a welcome message).
+    `;
 
     const result = streamText({
       model: openai('qwen-plus'),
       system: systemPrompt,
-      messages,
+      messages: chatMessages,
       tools: {
         enableReportButton: tool({
             description: 'Call this tool when you have gathered enough information about the user (Preferences, Willingness, Capabilities, Talents, Inclinations) and you have just asked the user if they want to see the report.',
