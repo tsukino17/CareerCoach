@@ -7,7 +7,14 @@ export const maxDuration = 30;
 
 export async function POST(req: Request) {
   try {
-    const { messages } = await req.json();
+    const body = (await req.json()) as unknown;
+    const messages = (body as { messages?: unknown })?.messages;
+    if (!Array.isArray(messages)) {
+      return new Response(JSON.stringify({ error: 'Invalid messages' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
 
     const openai = createOpenAI({
       baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
@@ -15,7 +22,15 @@ export async function POST(req: Request) {
     });
 
     // Take the first few messages for summary
-    const context = messages.slice(0, 4).map((m: any) => `${m.role}: ${m.content}`).join('\n');
+    const context = messages
+      .slice(0, 4)
+      .map((m) => {
+        const mm = m as { role?: unknown; content?: unknown };
+        const role = typeof mm.role === 'string' ? mm.role : 'unknown';
+        const content = typeof mm.content === 'string' ? mm.content : '';
+        return `${role}: ${content}`;
+      })
+      .join('\n');
 
     const { text } = await generateText({
       model: openai('qwen-plus'),

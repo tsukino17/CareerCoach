@@ -8,11 +8,9 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-  CardDescription,
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
 // import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter } from '@/components/ui/sheet';
 import {
   ArrowLeft,
@@ -80,6 +78,20 @@ interface RoleComparison {
   recommendation: string;
 }
 
+interface ActionPlanData {
+  goal: string;
+  duration: string;
+  phases: Array<{
+    week: string;
+    theme: string;
+    tasks: Array<{
+      day: string;
+      action: string;
+      type: 'learning' | 'action' | 'connection' | 'reflection';
+    }>;
+  }>;
+}
+
 type SharePower = {
   name: string;
   description: string;
@@ -135,122 +147,7 @@ function buildShareDescription(summary: string): string {
   return (normalized.slice(0, hardLimit).trimEnd() + '。').trim();
 }
 
-function ShareCardA({
-  report,
-  shareUrl,
-}: {
-  report: ReportData;
-  shareUrl: string;
-}) {
-  const powers = buildSharePowers(report);
-  const rawRoles = powers
-    .flatMap((p) => p.roles)
-    .filter(Boolean)
-    .map((r) => r.replace(/（.*?）|\(.*?\)/g, '').trim())
-    .filter(Boolean);
-  const roles = Array.from(new Set(rawRoles)).slice(0, 5);
-  const summary = buildShareDescription(report.summary);
-
-  return (
-    <div className="relative w-[1080px] h-[1600px] overflow-hidden rounded-[56px] text-slate-900 bg-[#f6f6f4]">
-      {/* Sunrise gradient banner */}
-      <div className="absolute inset-x-0 top-0 h-[420px] bg-gradient-to-b from-orange-200 via-rose-200 to-transparent" />
-      {/* Paper edge corner */}
-      <div className="absolute left-10 top-10 w-[860px] h-[480px] rounded-[48px] bg-white/85 shadow-[0_8px_40px_rgba(0,0,0,0.06)] backdrop-blur-sm border border-black/10" />
-
-      <div className="relative z-10 h-full px-20 pt-20 pb-16 flex flex-col">
-        {/* Header */}
-        <div className="flex items-start justify-between">
-          <div className="space-y-5">
-            <div className="text-[30px] tracking-wider text-slate-700">你的职业原型是</div>
-            <div className="text-[96px] leading-[1.04] font-extrabold tracking-tight drop-shadow-[0_1px_0_rgba(255,255,255,0.9)] text-[#7c2d12]">
-              {report.archetype}
-            </div>
-            <div className="text-[30px] leading-[1.6] text-slate-700 max-w-[760px]">
-              {summary}
-            </div>
-          </div>
-          <div className="w-[240px] shrink-0 rounded-[28px] bg-white border border-black/10 shadow-[0_8px_30px_rgba(0,0,0,0.06)] p-4">
-            <div className="w-full aspect-square rounded-2xl overflow-hidden bg-white">
-              <Image
-                src={`/api/qr-site?size=220`}
-                alt="QR"
-                width={220}
-                height={220}
-                className="w-full h-full object-cover"
-                priority
-                unoptimized
-              />
-            </div>
-            <div className="mt-3 text-center text-[20px] text-slate-700 font-semibold">
-              扫码开始天赋对话
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-14 grid grid-cols-12 gap-10 flex-1">
-          <div className="col-span-7 space-y-8">
-            <div className="rounded-[28px] bg-white border border-black/10 shadow-[0_8px_30px_rgba(0,0,0,0.06)] p-10">
-              <div className="text-[28px] font-semibold text-slate-900 tracking-tight">本质上你的亮点</div>
-              <div className="mt-6 space-y-6">
-                {powers.map((p, idx) => (
-                  <div key={p.name} className="space-y-2">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className="w-2.5 h-2.5 rounded-full shadow-[0_0_0_4px_rgba(59,130,246,0.08)]"
-                        style={{ background: ['#6366f1', '#10b981', '#f59e0b'][idx % 3] }}
-                      />
-                      <div
-                        className="text-[28px] font-semibold tracking-tight"
-                        style={{ color: ['#4f46e5', '#059669', '#d97706'][idx % 3] }}
-                      >
-                        {p.name}
-                      </div>
-                    </div>
-                    <div className="text-[24px] leading-[1.7] text-slate-700 pl-5">
-                      {p.description}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="col-span-5 flex flex-col">
-            <div className="rounded-[28px] bg-white border border-black/10 shadow-[0_8px_30px_rgba(0,0,0,0.06)] p-10">
-              <div className="text-[28px] font-semibold text-slate-900 tracking-tight">适配岗位</div>
-              <div className="mt-6 grid grid-cols-2 gap-3">
-                {roles.length > 0 ? (
-                  roles.map((r) => (
-                    <div
-                      key={r}
-                      className="px-4 py-3 rounded-2xl bg-gradient-to-br from-rose-50 to-orange-50 text-slate-700 text-[22px] tracking-tight border border-orange-100/80 shadow-sm"
-                    >
-                      {r}
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-[22px] text-slate-600 leading-relaxed">
-                    在报告中查看更完整的岗位与场景推荐。
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-10 flex items-center justify-between text-[18px] text-slate-500">
-          <div className="tracking-wide">EchoTalent</div>
-          <div>AI 生成结果，仅供参考</div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function RadarChart({ stats }: { stats: RPGStat[] }) {
-  if (!stats || stats.length === 0) return null;
-
   const [size, setSize] = useState(260);
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -260,6 +157,8 @@ function RadarChart({ stats }: { stats: RPGStat[] }) {
     mq.addEventListener('change', update);
     return () => mq.removeEventListener('change', update);
   }, []);
+
+  if (!stats || stats.length === 0) return null;
 
   const center = size / 2;
   const edgePadding = Math.round(size * 0.08);
@@ -494,9 +393,8 @@ export default function ReportPage() {
   const [roleAnalysis, setRoleAnalysis] = useState<RoleAnalysis | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [lastAnalysisRequest, setLastAnalysisRequest] = useState<{ role: string; context: string } | null>(null);
-  const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
   const [showRoleSheet, setShowRoleSheet] = useState(false);
-  const [planData, setPlanData] = useState<any>(null);
+  const [planData, setPlanData] = useState<ActionPlanData | null>(null);
 
   const [comparisonData, setComparisonData] = useState<RoleComparison | null>(null);
   const [showComparisonSheet, setShowComparisonSheet] = useState(false);
@@ -526,7 +424,7 @@ export default function ReportPage() {
     }
   }, [router]);
 
-  const postJsonWithTimeout = async <T,>(url: string, body: any, timeoutMs = 45000, retry = 1): Promise<T> => {
+  const postJsonWithTimeout = async <T,>(url: string, body: unknown, timeoutMs = 45000, retry = 1): Promise<T> => {
     try {
       const controller = new AbortController();
       const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
@@ -606,13 +504,23 @@ export default function ReportPage() {
     }
   };
 
+  const getRoleContext = () => {
+    const first = report?.superpowers?.[0];
+    if (typeof first === 'string') return 'User selected role';
+    if (first && typeof first === 'object') {
+      const name = (first as { name?: unknown })?.name;
+      if (typeof name === 'string' && name.trim()) return name;
+    }
+    return 'User selected role';
+  };
+
   const analyzeRoles = async () => {
     if (selectedRoles.length === 0) return;
 
     if (selectedRoles.length === 1) {
       // Analyze single role
       const role = selectedRoles[0];
-      const context = typeof report?.superpowers?.[0] === 'string' ? 'User selected role' : (report?.superpowers?.[0] as any)?.name || 'User selected role';
+      const context = getRoleContext();
       analyzeRole(role, context);
     } else {
       // Compare 2 roles
@@ -630,6 +538,17 @@ export default function ReportPage() {
       return (hash >>> 0).toString(16).padStart(8, '0');
     };
 
+    const isWeChat = () =>
+      typeof navigator !== 'undefined' && /MicroMessenger/i.test(navigator.userAgent || '');
+
+    const blobToDataUrl = (blob: Blob) =>
+      new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(new Error('Failed to read blob'));
+        reader.readAsDataURL(blob);
+      });
+
     const buildShareCacheKey = (data: ReportData, url: string) => {
       const powers = buildSharePowers(data).map((p) => ({
         n: p.name,
@@ -643,14 +562,14 @@ export default function ReportPage() {
         .filter(Boolean);
       const roles = Array.from(new Set(rawRoles)).slice(0, 5);
       const payload = JSON.stringify({
-        v: 20,
+        v: 25,
         a: data.archetype || '',
         s: buildShareDescription(data.summary || ''),
         p: powers,
         r: roles,
         u: url,
       });
-      return `sharecard-a-v20:${fnv1a(payload)}`;
+      return `sharecard-a-v25:${fnv1a(payload)}`;
     };
 
     const shareCacheRequest = (key: string) =>
@@ -666,6 +585,7 @@ export default function ReportPage() {
         const res = await cache.match(shareCacheRequest(key));
         if (!res) return null;
         const blob = await res.blob();
+        if (isWeChat()) return blobToDataUrl(blob);
         return URL.createObjectURL(blob);
       } catch {
         return null;
@@ -702,6 +622,29 @@ export default function ReportPage() {
       const normalized = (text || '').replace(/\s+/g, ' ').trim();
       if (!normalized) return lines;
 
+      const forbiddenLineStart = new Set([
+        '，',
+        '。',
+        '、',
+        '；',
+        '：',
+        '！',
+        '？',
+        '）',
+        '】',
+        '』',
+        '”',
+        '’',
+        ',',
+        '.',
+        ';',
+        '!',
+        '?',
+        '%',
+        '…',
+      ]);
+      const openingChars = new Set(['“', '‘', '（', '【', '《', '"', "'"]);
+
       let line = '';
       for (const ch of normalized.split('')) {
         const next = line + ch;
@@ -709,6 +652,28 @@ export default function ReportPage() {
           line = next;
           continue;
         }
+
+        if (line && forbiddenLineStart.has(ch)) {
+          let moved = '';
+          while (line.length > 1 && ctx.measureText(line + ch).width > maxWidth) {
+            moved = line.slice(-1) + moved;
+            line = line.slice(0, -1);
+          }
+          if (ctx.measureText(line + ch).width <= maxWidth) {
+            lines.push(line + ch);
+            line = moved || '';
+            continue;
+          }
+        }
+
+        if (line && openingChars.has(line.slice(-1))) {
+          const open = line.slice(-1);
+          const rest = line.slice(0, -1);
+          if (rest) lines.push(rest);
+          line = open + ch;
+          continue;
+        }
+
         if (line) lines.push(line);
         line = ch;
       }
@@ -734,7 +699,7 @@ export default function ReportPage() {
       ctx.closePath();
     };
 
-    const drawShareCardA = async (data: ReportData, url: string) => {
+    const drawShareCardA = async (data: ReportData) => {
       const W = 1080;
       const H = 1600;
       const canvas = document.createElement('canvas');
@@ -830,37 +795,88 @@ export default function ReportPage() {
         };
       })();
 
+      const ensureSentenceEnd = (text: string) => {
+        const t = (text || '').replace(/\s+/g, ' ').trim();
+        if (!t) return '';
+        if (/[。！？；;.!?…]$/.test(t)) return t;
+        if (t.length <= 12) return t;
+        if (/[，,、]$/.test(t)) return (t.slice(0, -1).trimEnd() + '。').trim();
+        return (t + '。').trim();
+      };
+
+      const compactShareText = (text: string) => {
+        let t = (text || '').replace(/\s+/g, ' ').trim();
+        if (!t) return '';
+        t = t.replace(/‘/g, '“');
+        t = t.replace(/’/g, '”');
+        t = t.replace(/（[^）]*）|\([^)]*\)/g, '');
+        t = t.replace(/某种程度上|一定程度上|相对来说|总体而言|整体来看|从某种意义上说/g, '');
+        t = t.replace(/能够/g, '能');
+        t = t.replace(/可以/g, '可');
+        t = t.replace(/不断|持续/g, '');
+        t = t.replace(/同时|并且|而且/g, '');
+        t = t.replace(/\s+/g, ' ').trim();
+        t = t.replace(/。{2,}/g, '。');
+        return t;
+      };
+
       const takeMeaningful = (text: string, hardLimit: number) => {
         const normalized = (text || '').replace(/\s+/g, ' ').trim();
         if (!normalized) return '';
-        if (normalized.length <= hardLimit) return normalized;
+        if (normalized.length <= hardLimit) return ensureSentenceEnd(normalized);
         const windowStart = Math.max(0, hardLimit - 60);
         const windowText = normalized.slice(windowStart, hardLimit);
         const match = windowText.match(/.*[。！？；;]/);
         if (match && match[0]) {
           const cut = windowStart + match[0].length;
-          return normalized.slice(0, cut).trim();
+          return ensureSentenceEnd(normalized.slice(0, cut).trim());
         }
         const lastComma = Math.max(windowText.lastIndexOf('，'), windowText.lastIndexOf(','));
         if (lastComma > 20) {
-          return (normalized.slice(0, windowStart + lastComma).trimEnd() + '。').trim();
+          return ensureSentenceEnd(normalized.slice(0, windowStart + lastComma).trimEnd());
         }
         const lastSpace = windowText.lastIndexOf(' ');
         if (lastSpace > 30) {
-          return (normalized.slice(0, windowStart + lastSpace).trimEnd() + '。').trim();
+          return ensureSentenceEnd(normalized.slice(0, windowStart + lastSpace).trimEnd());
         }
-        return (normalized.slice(0, hardLimit).trimEnd() + '。').trim();
+        return ensureSentenceEnd(normalized.slice(0, hardLimit).trimEnd());
       };
 
       const fitTextToMaxLines = (text: string, maxWidth: number, maxLines: number, initialLimit: number) => {
-        let limit = initialLimit;
-        for (let i = 0; i < 14; i++) {
-          const excerpt = takeMeaningful(text, limit);
+        const normalized = compactShareText(text);
+        if (!normalized) return [];
+
+        const firstSentenceMatch = normalized.match(/^[\s\S]*?[。！？；;]/);
+        const candidates = [
+          firstSentenceMatch?.[0]?.trim() ? ensureSentenceEnd(firstSentenceMatch[0].trim()) : '',
+          normalized,
+        ].filter(Boolean);
+
+        for (const base of candidates) {
+          let limit = initialLimit;
+          for (let i = 0; i < 28; i++) {
+            const excerpt = takeMeaningful(base, limit);
+            const lines = wrapLines(ctx, excerpt, maxWidth);
+            if (lines.length <= maxLines) return lines;
+            limit = Math.max(24, limit - 8);
+          }
+        }
+
+        let limit = Math.min(80, initialLimit);
+        while (limit >= 12) {
+          const excerpt = takeMeaningful(normalized, limit);
           const lines = wrapLines(ctx, excerpt, maxWidth);
           if (lines.length <= maxLines) return lines;
-          limit = Math.max(60, limit - 10);
+          limit -= 2;
         }
-        return wrapLines(ctx, takeMeaningful(text, 80), maxWidth).slice(0, maxLines);
+
+        for (let hard = 10; hard >= 4; hard--) {
+          const tiny = takeMeaningful(normalized, hard);
+          const lines = wrapLines(ctx, tiny, maxWidth);
+          if (lines.length <= maxLines) return lines;
+        }
+
+        return [ellipsizeToWidth(ensureSentenceEnd(normalized), maxWidth)];
       };
 
       const fitFontSizeToWidth = (
@@ -1172,14 +1188,143 @@ export default function ReportPage() {
       const itemFontFamily =
         '"Noto Sans SC", system-ui, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif';
       ctx.font = `450 18px ${itemFontFamily}`;
-      const longWrapWidth = colW - 56;
-      const shortWrapWidth = colW - 36;
+      const tagInsetX = 16;
+      const tagInsetY = 10;
+      const tagTextPad = 10;
+      const tagWrapWidth = colW - tagInsetX * 2 - tagTextPad * 2;
+      const splitRoleLabel = (raw: string) => {
+        const text = (raw || '').replace(/\s+/g, ' ').trim();
+        if (!text) return { firstLine: '', secondLine: '' };
+        if (ctx.measureText(text).width <= tagWrapWidth) {
+          return { firstLine: ellipsizeToWidth(text, tagWrapWidth), secondLine: '' };
+        }
+
+        const addCandidate = (set: Set<number>, idx: number) => {
+          const i = Math.floor(idx);
+          if (i >= 2 && i <= text.length - 2) set.add(i);
+        };
+
+        const bestSplit = (() => {
+          const candidates = new Set<number>();
+          const bonuses = new Map<number, number>();
+          const mark = (idx: number, bonus: number) => {
+            const i = Math.floor(idx);
+            if (i < 2 || i > text.length - 2) return;
+            bonuses.set(i, Math.max(bonuses.get(i) ?? 0, bonus));
+            candidates.add(i);
+          };
+
+          addCandidate(candidates, Math.floor(text.length / 2));
+          addCandidate(candidates, 6);
+
+          for (let i = 0; i < text.length; i++) {
+            const ch = text[i];
+            if (ch === ' ' || ch === '-' || ch === '·' || ch === '/' || ch === '&') mark(i + 1, 180);
+          }
+
+          const breakAfter = [
+            '职业',
+            '行业',
+            '教育',
+            '心理',
+            '产品',
+            '运营',
+            '市场',
+            '增长',
+            '安全',
+            '数据',
+            '项目',
+            '组织',
+            '人力',
+            '品牌',
+            '用户',
+            '客户',
+            '商业',
+            '技术',
+            '研发',
+            '设计',
+            '咨询',
+            '内容',
+            '策略',
+            '体验',
+          ];
+          for (const kw of breakAfter) {
+            let pos = text.indexOf(kw);
+            while (pos !== -1) {
+              mark(pos + kw.length, 280);
+              pos = text.indexOf(kw, pos + 1);
+            }
+          }
+
+          const breakBefore = [
+            '顾问',
+            '教练',
+            '讲师',
+            '设计师',
+            '工程师',
+            '经理',
+            '专家',
+            '分析师',
+            '研究员',
+            '负责人',
+            '总监',
+            '合伙人',
+            'facilitator',
+            'Facilitator',
+          ];
+          for (const kw of breakBefore) {
+            let pos = text.indexOf(kw);
+            while (pos !== -1) {
+              mark(pos, 360);
+              pos = text.indexOf(kw, pos + 1);
+            }
+          }
+
+          const scoreAt = (idx: number) => {
+            const first = text.slice(0, idx).trim();
+            const second = text.slice(idx).trim();
+            if (!first || !second) return null;
+            const w1 = ctx.measureText(first).width;
+            const w2 = ctx.measureText(second).width;
+            const over1 = w1 > tagWrapWidth;
+            const over2 = w2 > tagWrapWidth;
+            const tooShort = first.length <= 2 || second.length <= 2;
+
+            let score = Math.abs(w1 - w2);
+            if (over1) score += 700;
+            if (over2) score += 700;
+            if (tooShort) score += 900;
+            const bonus = bonuses.get(idx) ?? 0;
+            score -= bonus;
+            return { idx, first, second, score };
+          };
+
+          let best: { idx: number; first: string; second: string; score: number } | null = null;
+          for (const idx of candidates) {
+            const scored = scoreAt(idx);
+            if (!scored) continue;
+            if (!best || scored.score < best.score) best = scored;
+          }
+          return best;
+        })();
+
+        if (bestSplit) {
+          const firstLine = ellipsizeToWidth(bestSplit.first, tagWrapWidth);
+          const secondLine = ellipsizeToWidth(bestSplit.second, tagWrapWidth);
+          if (secondLine) return { firstLine, secondLine };
+          return { firstLine: ellipsizeToWidth(text, tagWrapWidth), secondLine: '' };
+        }
+
+        const lines = wrapLines(ctx, text, tagWrapWidth);
+        const firstLineRaw = lines[0] ?? '';
+        const firstLine = ellipsizeToWidth(firstLineRaw, tagWrapWidth);
+        const secondRaw = lines.length > 1 ? lines.slice(1).join('') : '';
+        const secondLine = secondRaw ? ellipsizeToWidth(secondRaw, tagWrapWidth) : '';
+        return { firstLine, secondLine };
+      };
       const roleEntries = roles
         .map((name) => {
-          const lines = wrapLines(ctx, name, longWrapWidth);
-          const firstLine = lines[0] ?? '';
-          const secondRaw = lines.length > 1 ? lines.slice(1).join('') : '';
-          const secondLine = secondRaw ? ellipsizeToWidth(secondRaw, longWrapWidth) : '';
+          const { firstLine, secondLine } = splitRoleLabel(name);
           return { name, firstLine, secondLine, isLong: Boolean(secondLine) };
         })
         .sort((a, b) => Number(a.isLong) - Number(b.isLong));
@@ -1187,7 +1332,7 @@ export default function ReportPage() {
       let currentY = listTop;
       for (let i = 0; i < roleEntries.length; i++) {
         const x = rolesX;
-        const { name, firstLine, secondLine } = roleEntries[i];
+      const { firstLine, secondLine } = roleEntries[i];
 
         const borderColors = palette.accents.length > 0 ? palette.accents : [palette.tagText];
         const borderColor = borderColors[i % borderColors.length];
@@ -1196,10 +1341,6 @@ export default function ReportPage() {
         const itemH = secondLine ? 70 : 52;
         const y = currentY;
         if (y + itemH > maxY) break;
-
-        const insetX = secondLine ? 14 : 7;
-        const insetY = secondLine ? 8 : 5;
-        const textX = secondLine ? 18 : 12;
 
         ctx.save();
         ctx.strokeStyle = borderColor;
@@ -1210,23 +1351,22 @@ export default function ReportPage() {
         ctx.restore();
 
         ctx.save();
-        roundRectPath(ctx, x + insetX, y + insetY, colW - insetX * 2, itemH - insetY * 2, 999);
+        roundRectPath(ctx, x + tagInsetX, y + tagInsetY, colW - tagInsetX * 2, itemH - tagInsetY * 2, 999);
         ctx.clip();
+        ctx.textAlign = 'center';
+        const cx = x + colW / 2;
         if (!secondLine) {
           ctx.textBaseline = 'middle';
-          ctx.fillText(firstLine, x + textX, y + itemH / 2);
+          ctx.fillText(firstLine, cx, y + itemH / 2);
         } else {
-          ctx.textBaseline = 'top';
-          const top = y + 14;
+          ctx.textBaseline = 'middle';
           const lineHeight = 22;
-          const lines = wrapLines(ctx, name, longWrapWidth);
-          const l1 = lines[0] ?? '';
-          const l2Raw = lines.length > 1 ? lines.slice(1).join('') : '';
-          const l2 = l2Raw ? ellipsizeToWidth(l2Raw, longWrapWidth) : '';
-          ctx.fillText(l1, x + textX, top);
-          if (l2) ctx.fillText(l2, x + textX, top + lineHeight);
+          const centerY = y + itemH / 2;
+          ctx.fillText(firstLine, cx, centerY - lineHeight / 2);
+          ctx.fillText(secondLine, cx, centerY + lineHeight / 2);
         }
         ctx.restore();
+        ctx.textAlign = 'left';
 
         currentY += itemH + rowGap;
       }
@@ -1288,7 +1428,7 @@ export default function ReportPage() {
           return;
         }
 
-        const canvas = await drawShareCardA(report, shareUrl);
+        const canvas = await drawShareCardA(report);
         await new Promise<void>((resolve) => {
           canvas.toBlob((blob) => {
             if (!blob) {
@@ -1296,11 +1436,19 @@ export default function ReportPage() {
               resolve();
               return;
             }
-            const url = URL.createObjectURL(blob);
-            setShareImgUrl((prev) => {
-              if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
-              return url;
-            });
+            const setUrl = (url: string) => {
+              setShareImgUrl((prev) => {
+                if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
+                return url;
+              });
+            };
+            if (isWeChat()) {
+              void blobToDataUrl(blob)
+                .then((dataUrl) => setUrl(dataUrl))
+                .catch(() => setUrl(URL.createObjectURL(blob)));
+            } else {
+              setUrl(URL.createObjectURL(blob));
+            }
             void putCachedBlob(key, blob);
             resolve();
           }, 'image/png');
@@ -1311,6 +1459,16 @@ export default function ReportPage() {
     };
   }, [report, reportArchetype, shareImgUrl, shareUrl]);
 
+  const openShare = () => {
+    setShareOpen(true);
+    if (typeof window === 'undefined') return;
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        void renderShareImage();
+      });
+    });
+  };
+
   useEffect(() => {
     if (!reportArchetype || !shareUrl) return;
     if (shareImgUrl) return;
@@ -1319,14 +1477,15 @@ export default function ReportPage() {
     qrPreload.src = `/api/qr-site?size=260`;
 
     const schedule = (cb: () => void) => {
-      const ric = (window as any).requestIdleCallback;
+      const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout?: number }) => number })
+        .requestIdleCallback;
       if (typeof ric === 'function') return ric(cb, { timeout: 1200 });
       return window.setTimeout(cb, 300);
     };
 
     const id = schedule(() => renderShareImage());
     return () => {
-      const cic = (window as any).cancelIdleCallback;
+      const cic = (window as unknown as { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback;
       if (typeof cic === 'function') cic(id);
       else window.clearTimeout(id);
     };
@@ -1397,7 +1556,7 @@ export default function ReportPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => { setShareOpen(true); renderShareImage(); }}
+            onClick={openShare}
             className="hidden md:inline-flex rounded-full bg-white/70 border-black/10 hover:bg-white"
           >
             <Share2 className="w-4 h-4 mr-2" />
@@ -1554,8 +1713,7 @@ export default function ReportPage() {
         <Button
           variant="outline"
           onClick={() => {
-            setShareOpen(true);
-            renderShareImage();
+            openShare();
           }}
           className="w-full rounded-2xl bg-white/80 border-black/10 hover:bg-white shadow-sm"
         >
@@ -1629,7 +1787,7 @@ export default function ReportPage() {
                     <button 
                       onClick={(e) => { 
                         e.stopPropagation(); 
-                        analyzeRole(role, typeof report.superpowers?.[0] === 'string' ? 'User selected role' : (report.superpowers?.[0] as any)?.name || 'User selected role'); 
+                        analyzeRole(role, getRoleContext()); 
                       }}
                       className="ml-1 hover:bg-primary/20 rounded-full p-0.5 transition-colors"
                       title="查看深度解析"
@@ -1789,7 +1947,8 @@ export default function ReportPage() {
                           const match = cleanLine.match(/^(.+?[：:])\s*(.*)/);
                           
                           if (match) {
-                            const [_, header, content] = match;
+                            const header = match[1] ?? '';
+                            const content = match[2] ?? '';
                             // If header is short (likely "上午：", "下午："), bold it
                             if (header.length <= 10) {
                               return (

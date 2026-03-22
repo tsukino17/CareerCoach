@@ -20,9 +20,42 @@ const planSchema = z.object({
   }))
 });
 
+type ChatMessage = { role: 'user' | 'assistant' | 'system'; content: string };
+type Superpower = string | { name: string; description?: string; potential_roles?: string[] };
+type ReportInput = {
+  archetype: string;
+  summary: string;
+  skills?: string[];
+  superpowers?: Superpower[];
+  target_roles?: string[];
+};
+
 export async function POST(req: Request) {
   try {
-    const { report, messages } = await req.json();
+    const body = (await req.json()) as unknown;
+    const report = (body as { report?: unknown })?.report as ReportInput | undefined;
+    const messages = (body as { messages?: unknown })?.messages as unknown;
+    if (!report || typeof report.archetype !== 'string' || typeof report.summary !== 'string') {
+      return new Response(JSON.stringify({ error: 'Invalid report' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (!Array.isArray(messages)) {
+      return new Response(JSON.stringify({ error: 'Invalid messages' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    const chatMessages: ChatMessage[] = messages
+      .map((m) => {
+        const mm = m as { role?: unknown; content?: unknown };
+        const role = mm.role === 'user' || mm.role === 'assistant' || mm.role === 'system' ? mm.role : null;
+        const content = typeof mm.content === 'string' ? mm.content : null;
+        if (!role || !content) return null;
+        return { role, content };
+      })
+      .filter((m): m is ChatMessage => Boolean(m));
 
     // Log the incoming data for debugging
     console.log('Generating plan for archetype:', report?.archetype);
@@ -41,7 +74,7 @@ export async function POST(req: Request) {
     - Archetype: ${report.archetype}
     - Summary: ${report.summary}
     - Top Skills: ${report.skills?.join(', ') || 'N/A'}
-    - Superpowers: ${report.superpowers?.map((s: any) => typeof s === 'string' ? s : s.name).join(', ') || 'N/A'}
+    - Superpowers: ${report.superpowers?.map((s) => (typeof s === 'string' ? s : s.name)).join(', ') || 'N/A'}
     
     ${report.target_roles ? `The user has specifically selected these target roles: ${report.target_roles.join(', ')}. Focus the plan on transitioning into one or both of these roles.` : ''}
 
@@ -66,7 +99,7 @@ export async function POST(req: Request) {
       schema: planSchema,
       system: systemPrompt,
       messages: [
-        ...messages, 
+        ...chatMessages,
         { role: 'user', content: 'Please generate my execution plan now.' }
       ],
       mode: 'json',
@@ -77,10 +110,10 @@ export async function POST(req: Request) {
     return new Response(JSON.stringify(sanitizedObject), {
       headers: { 'Content-Type': 'application/json' },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Plan Generation Error Full:', error);
     // Return the actual error message if possible to help debugging
-    const errorMessage = error.message || 'Unknown error';
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return new Response(JSON.stringify({ error: 'Failed to generate plan', details: errorMessage }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' },

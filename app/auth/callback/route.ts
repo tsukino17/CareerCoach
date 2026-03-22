@@ -19,7 +19,7 @@ export async function GET(request: Request) {
     }
 
     const supabase = createClient(supabaseUrl, supabaseAnonKey);
-    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
       // 成功后，重定向到用户中心或聊天页面
       // 注意：exchangeCodeForSession 只是在服务器端获取了 session，
