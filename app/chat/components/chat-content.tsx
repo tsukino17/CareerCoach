@@ -729,10 +729,10 @@ function ChatContentInner({ urlId, isNewChatRequested }: ChatContentProps) {
                         variant="ghost"
                         size="icon"
                         onClick={() => router.push('/user')}
-                        className="rounded-full w-8 h-8 sm:w-9 sm:h-9 bg-secondary/10 hover:bg-secondary/20 ml-0.5 sm:ml-1 border border-white/20"
+                        className="group rounded-full w-8 h-8 sm:w-9 sm:h-9 bg-white/35 hover:bg-primary/15 hover:shadow-md hover:shadow-primary/15 hover:scale-105 active:bg-primary/25 active:scale-95 transition-all duration-150 ml-0.5 sm:ml-1 border border-white/35 hover:border-primary/25"
                         title="用户中心"
                     >
-                        <User className="w-4 h-4 sm:w-5 sm:h-5 text-foreground/70" />
+                        <User className="w-4 h-4 sm:w-5 sm:h-5 text-foreground/70 group-hover:text-foreground/90 group-active:text-foreground/90" />
                     </Button>
                 </div>
             </header>
