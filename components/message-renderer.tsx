@@ -13,6 +13,13 @@ export function MessageRenderer({ content, role }: MessageRendererProps) {
   return (
     <div className={cn("space-y-4 text-sm md:text-base", role === 'assistant' ? "text-left" : "text-left")}>
       {paragraphs.map((paragraph, pIndex) => {
+        const shouldMuteReportSuggestion =
+          role === 'assistant' &&
+          /职业报告/.test(paragraph) &&
+          (/右上角/.test(paragraph) || /右上角的/.test(paragraph)) &&
+          /按钮/.test(paragraph) &&
+          /生成/.test(paragraph);
+
         // Check for blockquote
         if (paragraph.trim().startsWith('>')) {
           const quoteContent = paragraph.split('\n').map(line => line.replace(/^>\s?/, '')).join('\n');
@@ -64,7 +71,11 @@ export function MessageRenderer({ content, role }: MessageRendererProps) {
             )
         }
 
-        return <p key={pIndex} className="leading-7 tracking-wide">{formatText(paragraph)}</p>;
+        return (
+          <p key={pIndex} className={cn("leading-7 tracking-wide", shouldMuteReportSuggestion && "text-foreground/55")}>
+            {formatText(paragraph)}
+          </p>
+        );
       })}
     </div>
   );

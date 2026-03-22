@@ -562,14 +562,14 @@ export default function ReportPage() {
         .filter(Boolean);
       const roles = Array.from(new Set(rawRoles)).slice(0, 5);
       const payload = JSON.stringify({
-        v: 25,
+        v: 26,
         a: data.archetype || '',
         s: buildShareDescription(data.summary || ''),
         p: powers,
         r: roles,
         u: url,
       });
-      return `sharecard-a-v25:${fnv1a(payload)}`;
+      return `sharecard-a-v26:${fnv1a(payload)}`;
     };
 
     const shareCacheRequest = (key: string) =>
@@ -809,12 +809,15 @@ export default function ReportPage() {
         if (!t) return '';
         t = t.replace(/‘/g, '“');
         t = t.replace(/’/g, '”');
+        t = t.replace(/[—–]{2,}/g, '，');
         t = t.replace(/（[^）]*）|\([^)]*\)/g, '');
         t = t.replace(/某种程度上|一定程度上|相对来说|总体而言|整体来看|从某种意义上说/g, '');
         t = t.replace(/能够/g, '能');
         t = t.replace(/可以/g, '可');
         t = t.replace(/不断|持续/g, '');
         t = t.replace(/同时|并且|而且/g, '');
+        t = t.replace(/你不是([^，。]{2,28})[，,]\s*而是/g, '你并非$1，更像是');
+        t = t.replace(/不是([^，。]{2,28})[，,]\s*而是/g, '并非$1，更像是');
         t = t.replace(/\s+/g, ' ').trim();
         t = t.replace(/。{2,}/g, '。');
         return t;
@@ -877,6 +880,34 @@ export default function ReportPage() {
         }
 
         return [ellipsizeToWidth(ensureSentenceEnd(normalized), maxWidth)];
+      };
+
+      const fitTextToPreferLines = (
+        text: string,
+        maxWidth: number,
+        maxLines: number,
+        initialLimit: number,
+        minLines: number
+      ) => {
+        const normalized = compactShareText(text);
+        if (!normalized) return [];
+
+        let best: { lines: string[]; length: number } | null = null;
+        let limit = initialLimit;
+        for (let i = 0; i < 36; i++) {
+          const excerpt = takeMeaningful(normalized, limit);
+          const lines = wrapLines(ctx, excerpt, maxWidth);
+          if (lines.length <= maxLines) {
+            if (lines.length >= minLines) return lines;
+            const len = excerpt.length;
+            if (!best || lines.length > best.lines.length || (lines.length === best.lines.length && len > best.length)) {
+              best = { lines, length: len };
+            }
+          }
+          limit = Math.max(36, limit - 10);
+        }
+
+        return best?.lines ?? fitTextToMaxLines(normalized, maxWidth, maxLines, Math.min(initialLimit, 220));
       };
 
       const fitFontSizeToWidth = (
@@ -1046,15 +1077,16 @@ export default function ReportPage() {
 
       ctx.fillStyle = palette.muted;
       ctx.font =
-        '400 30px "Noto Sans SC", system-ui, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif';
-      const descLines = fitTextToMaxLines(data.summary || '', innerW, 5, 240);
-      let dy = innerY + 230;
+        '400 28px "Noto Sans SC", system-ui, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif';
+      const subtitleSource = [data.summary || '', powers[0]?.description || ''].filter(Boolean).join(' ');
+      const descLines = fitTextToPreferLines(subtitleSource, innerW, 5, 360, 4);
+      let dy = innerY + 220;
       for (const line of descLines) {
         ctx.fillText(line, innerX, dy);
-        dy += 54;
+        dy += 46;
       }
 
-      const panelsTop = Math.max(innerY + 360, dy + 24);
+      const panelsTop = Math.max(innerY + 360, dy + 18);
       const panelGap = 28;
       const leftW = 520;
       const rightW = innerW - leftW - panelGap;
@@ -1826,12 +1858,12 @@ export default function ReportPage() {
         <div className="fixed inset-0 z-[100] flex justify-end">
           {/* Backdrop */}
           <div 
-            className="absolute inset-0 bg-black/20 backdrop-blur-sm animate-in fade-in duration-300"
-            onClick={() => setShowRoleSheet(false)}
+            className="absolute inset-0 z-0 bg-black/20 backdrop-blur-sm animate-in fade-in duration-300"
+            onPointerDown={() => setShowRoleSheet(false)}
           />
           
           {/* Sheet Content */}
-          <div className="relative w-full max-w-md h-full bg-white shadow-2xl animate-in slide-in-from-right duration-300 border-l border-black/5 flex flex-col">
+          <div className="relative z-10 w-full max-w-md h-full bg-white shadow-2xl animate-in slide-in-from-right duration-300 border-l border-black/5 flex flex-col pointer-events-auto">
             <div className="flex items-center justify-between p-6 border-b border-black/5">
               <div>
                 <h2 className="text-lg font-bold text-foreground">职业深度解析</h2>
