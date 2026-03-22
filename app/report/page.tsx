@@ -562,14 +562,14 @@ export default function ReportPage() {
         .filter(Boolean);
       const roles = Array.from(new Set(rawRoles)).slice(0, 5);
       const payload = JSON.stringify({
-        v: 26,
+        v: 29,
         a: data.archetype || '',
         s: buildShareDescription(data.summary || ''),
         p: powers,
         r: roles,
         u: url,
       });
-      return `sharecard-a-v26:${fnv1a(payload)}`;
+      return `sharecard-a-v29:${fnv1a(payload)}`;
     };
 
     const shareCacheRequest = (key: string) =>
@@ -678,6 +678,40 @@ export default function ReportPage() {
         line = ch;
       }
       if (line) lines.push(line);
+
+        for (let i = 1; i < lines.length; i++) {
+        let curr = lines[i] || '';
+        let prev = lines[i - 1] || '';
+        if (!curr || !prev) continue;
+
+        const needsFix = () => curr.length <= 1 || forbiddenLineStart.has(curr[0]);
+        let guard = 0;
+          while (guard < 10 && needsFix() && prev.length > 1) {
+          let take = curr.length <= 1 ? 2 : 1;
+            take = Math.min(Math.max(take, prev.length === 2 ? 2 : 1), prev.length - 1);
+          let segment = prev.slice(-take);
+          while (segment && forbiddenLineStart.has(segment[0]) && take < prev.length - 1) {
+            take += 1;
+            segment = prev.slice(-take);
+          }
+          if (!segment) break;
+
+          const nextPrev = prev.slice(0, -take);
+          const nextCurr = segment + curr;
+
+            if ((nextPrev || '').trim().length < 2) break;
+          if (ctx.measureText(nextCurr).width > maxWidth) break;
+          if (forbiddenLineStart.has(nextCurr[0])) break;
+
+          prev = nextPrev;
+          curr = nextCurr;
+          guard += 1;
+        }
+
+        lines[i - 1] = prev;
+        lines[i] = curr;
+      }
+
       return lines;
     };
 
@@ -804,12 +838,19 @@ export default function ReportPage() {
         return (t + '。').trim();
       };
 
-      const compactShareText = (text: string) => {
+      const normalizeShareTextBase = (text: string) => {
         let t = (text || '').replace(/\s+/g, ' ').trim();
         if (!t) return '';
         t = t.replace(/‘/g, '“');
         t = t.replace(/’/g, '”');
         t = t.replace(/[—–]{2,}/g, '，');
+        t = t.replace(/\s+/g, ' ').trim();
+        return t;
+      };
+
+      const compressShareText = (text: string) => {
+        let t = normalizeShareTextBase(text);
+        if (!t) return '';
         t = t.replace(/（[^）]*）|\([^)]*\)/g, '');
         t = t.replace(/某种程度上|一定程度上|相对来说|总体而言|整体来看|从某种意义上说/g, '');
         t = t.replace(/能够/g, '能');
@@ -846,7 +887,7 @@ export default function ReportPage() {
       };
 
       const fitTextToMaxLines = (text: string, maxWidth: number, maxLines: number, initialLimit: number) => {
-        const normalized = compactShareText(text);
+        const normalized = compressShareText(text);
         if (!normalized) return [];
 
         const firstSentenceMatch = normalized.match(/^[\s\S]*?[。！？；;]/);
@@ -889,7 +930,7 @@ export default function ReportPage() {
         initialLimit: number,
         minLines: number
       ) => {
-        const normalized = compactShareText(text);
+        const normalized = compressShareText(text);
         if (!normalized) return [];
 
         let best: { lines: string[]; length: number } | null = null;
@@ -908,6 +949,36 @@ export default function ReportPage() {
         }
 
         return best?.lines ?? fitTextToMaxLines(normalized, maxWidth, maxLines, Math.min(initialLimit, 220));
+      };
+
+      const fitTextToPreferLinesWithTracking = (
+        text: string,
+        maxWidth: number,
+        maxLines: number,
+        initialLimit: number,
+        minLines: number,
+        tracking: number
+      ) => {
+        const normalized = compressShareText(text);
+        if (!normalized) return [];
+
+        let best: { lines: string[]; length: number } | null = null;
+        let limit = initialLimit;
+        for (let i = 0; i < 36; i++) {
+          const excerpt = takeMeaningful(normalized, limit);
+          const lines = wrapLinesWithTracking(excerpt, maxWidth, tracking);
+          if (lines.length <= maxLines) {
+            if (lines.length >= minLines) return lines;
+            const len = excerpt.length;
+            if (!best || lines.length > best.lines.length || (lines.length === best.lines.length && len > best.length)) {
+              best = { lines, length: len };
+            }
+          }
+          limit = Math.max(36, limit - 10);
+        }
+
+        if (best) return best.lines;
+        return [ellipsizeToWidthWithTracking(ensureSentenceEnd(normalized), maxWidth, tracking)];
       };
 
       const fitFontSizeToWidth = (
@@ -934,6 +1005,104 @@ export default function ReportPage() {
           if (i < chars.length - 1) w += tracking;
         }
         return w;
+      };
+
+      const wrapLinesWithTracking = (text: string, maxWidth: number, tracking: number) => {
+        const lines: string[] = [];
+        const normalized = (text || '').replace(/\s+/g, ' ').trim();
+        if (!normalized) return lines;
+
+        const forbiddenLineStart = new Set([
+          '，',
+          '。',
+          '、',
+          '；',
+          '：',
+          '！',
+          '？',
+          '）',
+          '】',
+          '』',
+          '”',
+          '’',
+          ',',
+          '.',
+          ';',
+          '!',
+          '?',
+          '%',
+          '…',
+        ]);
+        const openingChars = new Set(['“', '‘', '（', '【', '《', '"', "'"]);
+
+        let line = '';
+        for (const ch of normalized.split('')) {
+          const next = line + ch;
+          if (measureTextWithTracking(next, tracking) <= maxWidth) {
+            line = next;
+            continue;
+          }
+
+          if (line && forbiddenLineStart.has(ch)) {
+            let moved = '';
+            while (line.length > 1 && measureTextWithTracking(line + ch, tracking) > maxWidth) {
+              moved = line.slice(-1) + moved;
+              line = line.slice(0, -1);
+            }
+            if (measureTextWithTracking(line + ch, tracking) <= maxWidth) {
+              lines.push(line + ch);
+              line = moved || '';
+              continue;
+            }
+          }
+
+          if (line && openingChars.has(line.slice(-1))) {
+            const open = line.slice(-1);
+            const rest = line.slice(0, -1);
+            if (rest) lines.push(rest);
+            line = open + ch;
+            continue;
+          }
+
+          if (line) lines.push(line);
+          line = ch;
+        }
+        if (line) lines.push(line);
+
+        for (let i = 1; i < lines.length; i++) {
+          let curr = lines[i] || '';
+          let prev = lines[i - 1] || '';
+          if (!curr || !prev) continue;
+
+          const needsFix = () => curr.length <= 1 || forbiddenLineStart.has(curr[0]);
+          let guard = 0;
+          while (guard < 10 && needsFix() && prev.length > 1) {
+            let take = curr.length <= 1 ? 2 : 1;
+            take = Math.min(Math.max(take, prev.length === 2 ? 2 : 1), prev.length - 1);
+            let segment = prev.slice(-take);
+            while (segment && forbiddenLineStart.has(segment[0]) && take < prev.length - 1) {
+              take += 1;
+              segment = prev.slice(-take);
+            }
+            if (!segment) break;
+
+            const nextPrev = prev.slice(0, -take);
+            const nextCurr = segment + curr;
+
+            if ((nextPrev || '').trim().length < 2) break;
+            if (measureTextWithTracking(nextCurr, tracking) > maxWidth) break;
+            if (forbiddenLineStart.has(nextCurr[0])) break;
+
+            prev = nextPrev;
+            curr = nextCurr;
+            guard += 1;
+          }
+
+          lines[i - 1] = prev;
+          lines[i] = curr;
+        }
+
+        return lines;
       };
 
       const fitFontSizeToWidthWithTracking = (
@@ -1079,10 +1248,174 @@ export default function ReportPage() {
       ctx.font =
         '400 28px "Noto Sans SC", system-ui, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif';
       const subtitleSource = [data.summary || '', powers[0]?.description || ''].filter(Boolean).join(' ');
-      const descLines = fitTextToPreferLines(subtitleSource, innerW, 5, 360, 4);
+      const subtitleMaxLines = 5;
+      const subtitleMinLines = 4;
+      const subtitleForbiddenStart = new Set([
+        '，',
+        '。',
+        '、',
+        '；',
+        '：',
+        '！',
+        '？',
+        '）',
+        '】',
+        '』',
+        '”',
+        '’',
+        ',',
+        '.',
+        ';',
+        '!',
+        '?',
+        '%',
+        '…',
+      ]);
+      const hasBadLine = (ls: string[]) =>
+        ls.some((l) => {
+          const t = (l || '').trim();
+          if (!t) return true;
+          if (t.length <= 1) return true;
+          return subtitleForbiddenStart.has(t[0]);
+        });
+      const wrapByTracking = (text: string, tracking: number) =>
+        tracking ? wrapLinesWithTracking(text, innerW, tracking) : wrapLines(ctx, text, innerW);
+
+      const pickSubtitle = (raw: string) => {
+        const base = normalizeShareTextBase(raw);
+        const fullTry = wrapByTracking(base, 0);
+        if (fullTry.length <= subtitleMaxLines && fullTry.length >= subtitleMinLines && !hasBadLine(fullTry)) {
+          return { lines: fullTry, tracking: 0 };
+        }
+
+        const trackings = [0, -0.4, -0.8, -1.2];
+        for (const tracking of trackings) {
+          const baseLines = wrapByTracking(base, tracking);
+          if (baseLines.length <= subtitleMaxLines && baseLines.length >= subtitleMinLines && !hasBadLine(baseLines)) {
+            return { lines: baseLines, tracking };
+          }
+        }
+
+        const compressed = compressShareText(raw);
+        const sentenceCuts: number[] = [];
+        for (let i = 0; i < compressed.length; i++) {
+          const ch = compressed[i];
+          if (ch === '。' || ch === '！' || ch === '？' || ch === '；' || ch === '…') sentenceCuts.push(i + 1);
+        }
+        const clauseCuts: number[] = [];
+        for (let i = 0; i < compressed.length; i++) {
+          const ch = compressed[i];
+          if (ch === '，' || ch === '、' || ch === '：') clauseCuts.push(i + 1);
+        }
+        const candidates = Array.from(new Set<number>([...sentenceCuts, ...clauseCuts, compressed.length])).sort(
+          (a, b) => a - b
+        );
+
+        for (const tracking of trackings) {
+          let best: { lines: string[]; len: number } | null = null;
+          for (const cut of candidates) {
+            let excerpt = compressed.slice(0, cut).trim();
+            if (!excerpt) continue;
+            if (!/[。！？；;.!?…]$/.test(excerpt)) excerpt = ensureSentenceEnd(excerpt);
+            const ls = wrapByTracking(excerpt, tracking);
+            if (ls.length > subtitleMaxLines) continue;
+            if (hasBadLine(ls)) continue;
+            if (ls.length >= subtitleMinLines) {
+              best = { lines: ls, len: excerpt.length };
+            } else if (!best || ls.length > best.lines.length || (ls.length === best.lines.length && excerpt.length > best.len)) {
+              best = { lines: ls, len: excerpt.length };
+            }
+          }
+          if (best && best.lines.length >= subtitleMinLines) return { lines: best.lines, tracking };
+        }
+
+        const fallbackTracking = -0.8;
+        const fallbackLines = wrapByTracking(ensureSentenceEnd(compressed), fallbackTracking);
+        return { lines: fallbackLines.slice(0, subtitleMaxLines), tracking: fallbackTracking };
+      };
+
+      const pickBlockText = (raw: string, maxWidth: number, maxLines: number, minLines: number) => {
+        const forbiddenStart = subtitleForbiddenStart;
+        const hasBad = (ls: string[]) =>
+          ls.some((l) => {
+            const t = (l || '').trim();
+            if (!t) return true;
+            if (t.length <= 1) return true;
+            return forbiddenStart.has(t[0]);
+          });
+        const wrapAt = (text: string, tracking: number) =>
+          tracking ? wrapLinesWithTracking(text, maxWidth, tracking) : wrapLines(ctx, text, maxWidth);
+
+        const base = normalizeShareTextBase(raw);
+        const trackings = [0, -0.4, -0.8, -1.2];
+
+        for (const tracking of trackings) {
+          const lines = wrapAt(base, tracking);
+          if (lines.length <= maxLines && !hasBad(lines) && lines.length >= minLines) {
+            return { lines, tracking };
+          }
+          if (lines.length <= maxLines && !hasBad(lines) && minLines <= 1) {
+            return { lines, tracking };
+          }
+        }
+
+        const compressed = compressShareText(raw);
+        const sentenceCuts: number[] = [];
+        const clauseCuts: number[] = [];
+        for (let i = 0; i < compressed.length; i++) {
+          const ch = compressed[i];
+          if (ch === '。' || ch === '！' || ch === '？' || ch === '；' || ch === '…') sentenceCuts.push(i + 1);
+          if (ch === '，' || ch === '、' || ch === '：') clauseCuts.push(i + 1);
+        }
+        const unique = (arr: number[]) => Array.from(new Set<number>(arr)).sort((a, b) => a - b);
+        const candidatesSentence = unique([...sentenceCuts, compressed.length]);
+        const candidatesClause = unique([...clauseCuts, ...sentenceCuts, compressed.length]);
+
+        const pickByCuts = (cuts: number[], tracking: number) => {
+          let best: { lines: string[]; len: number } | null = null;
+          for (const cut of cuts) {
+            let excerpt = compressed.slice(0, cut).trim();
+            if (!excerpt) continue;
+            if (!/[。！？；;.!?…]$/.test(excerpt)) excerpt = ensureSentenceEnd(excerpt);
+            const ls = wrapAt(excerpt, tracking);
+            if (ls.length > maxLines) continue;
+            if (hasBad(ls)) continue;
+            if (!best || excerpt.length > best.len) best = { lines: ls, len: excerpt.length };
+          }
+          return best?.lines ?? null;
+        };
+
+        for (const tracking of trackings) {
+          const bySentence = pickByCuts(candidatesSentence, tracking);
+          if (bySentence && bySentence.length >= minLines) return { lines: bySentence, tracking };
+        }
+        for (const tracking of trackings) {
+          const byClause = pickByCuts(candidatesClause, tracking);
+          if (byClause && byClause.length >= minLines) return { lines: byClause, tracking };
+        }
+
+        for (const tracking of trackings) {
+          for (let limit = 220; limit >= 60; limit -= 12) {
+            const excerpt = takeMeaningful(compressed, limit);
+            const ls = wrapAt(excerpt, tracking);
+            if (ls.length > maxLines) continue;
+            if (hasBad(ls)) continue;
+            if (ls.length >= minLines) return { lines: ls, tracking };
+          }
+        }
+
+        const fallbackTracking = -0.8;
+        const fallbackLines = wrapAt(ensureSentenceEnd(compressed), fallbackTracking);
+        return { lines: fallbackLines.slice(0, maxLines), tracking: fallbackTracking };
+      };
+
+      const subtitlePicked = pickSubtitle(subtitleSource);
+      const descLines = subtitlePicked.lines;
+      const subtitleTracking = subtitlePicked.tracking;
       let dy = innerY + 220;
       for (const line of descLines) {
-        ctx.fillText(line, innerX, dy);
+        if (subtitleTracking) drawTextWithTracking(line, innerX, dy, subtitleTracking);
+        else ctx.fillText(line, innerX, dy);
         dy += 46;
       }
 
@@ -1187,10 +1520,11 @@ export default function ReportPage() {
         ctx.fillStyle = palette.muted;
         ctx.font =
           '400 24px "Noto Sans SC", system-ui, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif';
-        const lines = fitTextToMaxLines(p.description, leftW - 80, 3, 160);
+        const picked = pickBlockText(p.description, leftW - 80, 3, 1);
         let ly = py + 46;
-        for (const line of lines) {
-          ctx.fillText(line, leftX + 60, ly);
+        for (const line of picked.lines) {
+          if (picked.tracking) drawTextWithTracking(line, leftX + 60, ly, picked.tracking);
+          else ctx.fillText(line, leftX + 60, ly);
           ly += 40;
         }
         py = ly + 28;
