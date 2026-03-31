@@ -3,6 +3,7 @@ import { Noto_Sans_SC } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 import ActionCoachEntryOverlay from "@/components/action-coach-entry-overlay";
+import { Analytics } from "@vercel/analytics/next";
 
 const notoSansSC = Noto_Sans_SC({ 
   subsets: ["latin"],
@@ -35,6 +36,7 @@ export default function RootLayout({
       >
         {children}
         <ActionCoachEntryOverlay />
+        <Analytics />
       </body>
     </html>
   );
