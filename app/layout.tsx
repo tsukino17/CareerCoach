@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Noto_Sans_SC } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
+import ActionCoachEntryOverlay from "@/components/action-coach-entry-overlay";
 
 const notoSansSC = Noto_Sans_SC({ 
   subsets: ["latin"],
@@ -28,7 +29,13 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-CN" suppressHydrationWarning>
-      <body className={cn(notoSansSC.className, "antialiased min-h-screen bg-background text-foreground")} suppressHydrationWarning>{children}</body>
+      <body
+        className={cn(notoSansSC.className, "antialiased min-h-screen bg-background text-foreground")}
+        suppressHydrationWarning
+      >
+        {children}
+        <ActionCoachEntryOverlay />
+      </body>
     </html>
   );
 }
