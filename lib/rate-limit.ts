@@ -45,6 +45,7 @@ type AsyncRateResult = {
 };
 
 let warnedFallback = false;
+const DISTRIBUTED_LIMITER_TIMEOUT_MS = 900;
 
 export async function checkRateLimitDistributed({ key, limit, windowMs }: RateLimitOptions): Promise<AsyncRateResult> {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -58,9 +59,13 @@ export async function checkRateLimitDistributed({ key, limit, windowMs }: RateLi
     return checkRateLimit({ key, limit, windowMs });
   }
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), DISTRIBUTED_LIMITER_TIMEOUT_MS);
+
   try {
     const response = await fetch(`${supabaseUrl}/rest/v1/rpc/consume_rate_limit`, {
       method: 'POST',
+      signal: controller.signal,
       headers: {
         apikey: serviceRoleKey,
         Authorization: `Bearer ${serviceRoleKey}`,
@@ -96,6 +101,8 @@ export async function checkRateLimitDistributed({ key, limit, windowMs }: RateLi
       console.warn(`[rate-limit] Distributed limiter unavailable, using in-memory fallback. ${message}`);
     }
     return checkRateLimit({ key, limit, windowMs });
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 

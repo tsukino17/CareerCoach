@@ -9,6 +9,7 @@ export const maxDuration = 30;
 export const preferredRegion = ['hkg1', 'sin1', 'iad1']; // Prioritize Asia regions if available on plan
 
 const CONTINUE_CHAT_CONTROL_PREFIX = '[EchoTalent UI Action: continue_current_topic]';
+const CHAT_MODEL = process.env.CHAT_MODEL || 'qwen-turbo';
 
 export async function POST(req: Request) {
   try {
@@ -72,7 +73,7 @@ export async function POST(req: Request) {
     }
 
     const result = streamText({
-      model: openai('qwen-plus'),
+      model: openai(CHAT_MODEL),
       system: systemPrompt,
       messages: chatMessages,
       tools: {
@@ -118,7 +119,7 @@ export async function POST(req: Request) {
           },
         }),
       },
-      maxSteps: 5,
+      maxSteps: 2,
     });
   
     return result.toDataStreamResponse();
