@@ -32,6 +32,12 @@ If the purpose is not concrete, do not call a tool.
 - Use `npm run dev` only when you explicitly need the raw framework command for debugging.
 - If a Next.js build or preview fails with missing `.next/server` chunks, stale static chunk 404s, or webpack pack cache errors, stop the running dev server and restart with `npm run preview`.
 
+## Release Version Hygiene
+
+- When preparing a version release, update all user-visible version labels that appear in the shipped UI, especially the `/chat` header badge and report/share filenames.
+- Keep `package.json`, `package-lock.json`, `CHANGELOG.md`, and visible in-app version text aligned with the intended release number unless the user explicitly asks to keep them separate.
+- Before committing a release, search for stale version strings from the previous release and either update them or confirm they are historical changelog content.
+
 ## Communication
 
 - Do not report meaningless internal tool mistakes.
