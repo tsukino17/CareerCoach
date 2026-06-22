@@ -32,8 +32,17 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PlanCard } from '@/components/plan-card';
-
-const REPORT_STORAGE_KEY = 'career_report_v1';
+import { CareerPathPreviewCard } from '@/components/career-path-preview-card';
+import {
+  buildPathMapPreview,
+  CHAT_STORAGE_KEY,
+  getOrCreateCareerDraftToken,
+  readActiveCareerSample,
+  REPORT_STORAGE_KEY,
+  saveGeneratedCareerSample,
+  type PathMapPreview,
+} from '@/lib/career-path';
+import { getDemoCaseById, isDemoModeActive, getActiveDemoCaseId } from '@/lib/demo-cases';
 
 interface RPGStat {
   name: string;
@@ -47,6 +56,7 @@ interface ReportData {
   superpowers: (string | { name: string; description: string; potential_roles?: string[] })[];
   summary: string;
   target_roles?: string[]; // Added for selected roles
+  generated_by?: 'model' | 'fallback';
 }
 
 interface RoleAnalysis {
@@ -98,21 +108,21 @@ type SharePower = {
   roles: string[];
 };
 
-function buildSharePowers(report: ReportData): SharePower[] {
+function buildSharePowers(report: ReportData, fallbackRoles: string[] = []): SharePower[] {
   return (report.superpowers || [])
     .map((p) => {
       if (typeof p === 'string') {
         return {
           name: '天赋能力',
           description: p,
-          roles: [],
+          roles: fallbackRoles,
         };
       }
 
       return {
         name: p.name,
         description: p.description,
-        roles: p.potential_roles || [],
+        roles: p.potential_roles?.length ? p.potential_roles : fallbackRoles,
       };
     })
     .filter((p) => p.description)
@@ -290,7 +300,27 @@ function RadarChart({ stats }: { stats: RPGStat[] }) {
   );
 }
 
- function FormatSummary({ text }: { text: string }) {
+const LEGACY_FALLBACK_SUMMARY =
+  '这份基础报告先帮你把当前对话里的职业线索稳定下来。它不是最终定论，而是一张可以继续展开的草图，适合用来进入路径预览、职业细节和后续对比。';
+
+function buildDisplaySummary(report: ReportData) {
+  const normalized = (report.summary || '').replace(/\s+/g, ' ').trim();
+  if (normalized && normalized !== LEGACY_FALLBACK_SUMMARY) return report.summary;
+
+  const skills = (report.skills || []).filter(Boolean).slice(0, 4);
+  const skillText = skills.length ? skills.join('、') : '自我觉察、现实判断与方向探索';
+  const firstPower = report.superpowers?.[0];
+  const firstPowerText = typeof firstPower === 'string' ? firstPower : firstPower?.description || '';
+  const signal = firstPowerText.match(/“([^”]+)”/)?.[1];
+
+  if (signal) {
+    return `你的职业原型更接近“${report.archetype}”：你正在把真实经历、个人感受和职业选择联系起来。尤其是“${signal}”这类表达，说明你不是只在寻找一个岗位名称，而是在辨认更适合自己工作方式、价值感和成长节奏的现实方向。`;
+  }
+
+  return `你的职业原型更接近“${report.archetype}”：当前对话里浮现出的核心线索是${skillText}。这些能力可以先作为判断职业方向的坐标，帮助你筛选更值得深入了解、验证和比较的现实岗位。`;
+}
+
+function FormatSummary({ text }: { text: string }) {
   if (!text) return null;
   // Split by straight or curly quotes
   const parts = text.split(/['‘’]/);
@@ -388,6 +418,7 @@ function LoadingState({ type = 'single' }: { type?: 'single' | 'comparison' }) {
 export default function ReportPage() {
   const router = useRouter();
   const [report, setReport] = useState<ReportData | null>(null);
+  const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
   const [analyzingRole, setAnalyzingRole] = useState<string | null>(null);
   const [roleAnalysis, setRoleAnalysis] = useState<RoleAnalysis | null>(null);
@@ -405,6 +436,9 @@ export default function ReportPage() {
   const [isRenderingShare, setIsRenderingShare] = useState(false);
   const [shareImgUrl, setShareImgUrl] = useState<string | null>(null);
   const shareImgKeyRef = useRef<string | null>(null);
+  const [pathPreview, setPathPreview] = useState<PathMapPreview | null>(null);
+
+  const fallbackRoleGroups = pathPreview?.direction_clusters?.map((cluster) => cluster.sample_roles).filter((roles) => roles.length > 0) || [];
 
   const shareUrl = useMemo(() => {
     return 'https://echotalent.fun/';
@@ -412,16 +446,89 @@ export default function ReportPage() {
   const reportArchetype = report?.archetype ?? '';
 
   useEffect(() => {
+    if (!report || typeof window === 'undefined') return;
+
+    const rawMessages = window.localStorage.getItem(CHAT_STORAGE_KEY);
+    if (!rawMessages) return;
+
+    try {
+      const parsed = JSON.parse(rawMessages);
+      if (!Array.isArray(parsed) || parsed.length === 0) return;
+      saveGeneratedCareerSample(report, parsed);
+    } catch (error) {
+      console.error('Failed to store current report as real sample:', error);
+    }
+  }, [report]);
+
+  useEffect(() => {
+    if (!report || report.generated_by === 'fallback') return;
+    let cancelled = false;
+    const basePreview = buildPathMapPreview(report);
+
+    const hydrateModelPreview = async () => {
+      try {
+        const data = await postJsonWithTimeout<PathMapPreview>('/api/career-path/preview', { report }, 18000, 0);
+        if (!cancelled) setPathPreview(data);
+      } catch (error) {
+        console.warn('Failed to hydrate model path preview, using base preview', error);
+        if (!cancelled && !pathPreview) setPathPreview(basePreview);
+      }
+    };
+
+    void hydrateModelPreview();
+    return () => {
+      cancelled = true;
+    };
+  }, [report]);
+
+  useEffect(() => {
     const savedReport = localStorage.getItem(REPORT_STORAGE_KEY);
     if (savedReport) {
       try {
-        setReport(JSON.parse(savedReport));
+        const parsed = JSON.parse(savedReport);
+        setReport(parsed);
+        setPathPreview(buildPathMapPreview(parsed));
+        setIsBootstrapping(false);
+        return;
       } catch (e) {
-        console.error('Failed to parse report:', e);
+        console.error('Failed to parse cached report:', e);
       }
-    } else {
-      router.push('/chat');
     }
+
+    const realSample = readActiveCareerSample();
+    if (realSample?.report) {
+      setReport(realSample.report);
+      setPathPreview(buildPathMapPreview(realSample.report));
+      localStorage.setItem(REPORT_STORAGE_KEY, JSON.stringify(realSample.report));
+      setIsBootstrapping(false);
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const demoCaseId = params.get('demo');
+    const demoCase = getDemoCaseById(demoCaseId);
+    if (demoCase) {
+      setReport(demoCase.report);
+      setPathPreview(buildPathMapPreview(demoCase.report));
+      localStorage.setItem(REPORT_STORAGE_KEY, JSON.stringify(demoCase.report));
+      setIsBootstrapping(false);
+      return;
+    }
+
+    if (isDemoModeActive()) {
+      const activeId = getActiveDemoCaseId();
+      const activeCase = getDemoCaseById(activeId);
+      if (activeCase) {
+        setReport(activeCase.report);
+        setPathPreview(buildPathMapPreview(activeCase.report));
+        localStorage.setItem(REPORT_STORAGE_KEY, JSON.stringify(activeCase.report));
+        setIsBootstrapping(false);
+        return;
+      }
+    }
+
+    setIsBootstrapping(false);
+    router.push('/chat');
   }, [router]);
 
   const postJsonWithTimeout = async <T,>(url: string, body: unknown, timeoutMs = 45000, retry = 1): Promise<T> => {
@@ -529,6 +636,7 @@ export default function ReportPage() {
   };
 
   const renderShareImage = useMemo(() => {
+    const shareFallbackRoles = pathPreview?.direction_clusters?.flatMap((cluster) => cluster.sample_roles).slice(0, 5) || [];
     const fnv1a = (str: string) => {
       let hash = 0x811c9dc5;
       for (let i = 0; i < str.length; i++) {
@@ -550,26 +658,26 @@ export default function ReportPage() {
       });
 
     const buildShareCacheKey = (data: ReportData, url: string) => {
-      const powers = buildSharePowers(data).map((p) => ({
+      const powers = buildSharePowers(data, shareFallbackRoles).map((p) => ({
         n: p.name,
         d: p.description,
         r: (p.roles || []).slice(0, 5),
       }));
-      const rawRoles = buildSharePowers(data)
+      const rawRoles = buildSharePowers(data, shareFallbackRoles)
         .flatMap((p) => p.roles)
         .filter(Boolean)
         .map((r) => r.replace(/（.*?）|\(.*?\)/g, '').trim())
         .filter(Boolean);
       const roles = Array.from(new Set(rawRoles)).slice(0, 5);
       const payload = JSON.stringify({
-        v: 29,
+        v: 30,
         a: data.archetype || '',
         s: buildShareDescription(data.summary || ''),
         p: powers,
         r: roles,
         u: url,
       });
-      return `sharecard-a-v29:${fnv1a(payload)}`;
+      return `sharecard-a-v30:${fnv1a(payload)}`;
     };
 
     const shareCacheRequest = (key: string) =>
@@ -617,103 +725,139 @@ export default function ReportPage() {
         img.src = src;
       });
 
-    const wrapLines = (ctx: CanvasRenderingContext2D, text: string, maxWidth: number) => {
-      const lines: string[] = [];
-      const normalized = (text || '').replace(/\s+/g, ' ').trim();
-      if (!normalized) return lines;
+    const forbiddenLineStart = new Set([
+      '，',
+      '。',
+      '、',
+      '；',
+      '：',
+      '！',
+      '？',
+      '）',
+      '】',
+      '』',
+      '”',
+      '’',
+      ',',
+      '.',
+      ';',
+      '!',
+      '?',
+      '%',
+      '…',
+    ]);
+    const openingChars = new Set(['“', '‘', '（', '【', '《', '"', "'"]);
+    const closingChars = new Set(['”', '’', '）', '】', '》', '"', "'"]);
+    const isAsciiWordChar = (ch: string) => /[A-Za-z0-9]/.test(ch);
+    const isAsciiWordJoiner = (ch: string) => /[._+#/&-]/.test(ch);
 
-      const forbiddenLineStart = new Set([
-        '，',
-        '。',
-        '、',
-        '；',
-        '：',
-        '！',
-        '？',
-        '）',
-        '】',
-        '』',
-        '”',
-        '’',
-        ',',
-        '.',
-        ';',
-        '!',
-        '?',
-        '%',
-        '…',
-      ]);
-      const openingChars = new Set(['“', '‘', '（', '【', '《', '"', "'"]);
+    const tokenizeForCanvasWrap = (text: string) => {
+      const normalized = (text || '').replace(/\s+/g, ' ').trim();
+      const tokens: string[] = [];
+      let i = 0;
+
+      while (i < normalized.length) {
+        const ch = normalized[i];
+        if (ch === ' ') {
+          tokens.push(ch);
+          i += 1;
+          continue;
+        }
+
+        if (isAsciiWordChar(ch)) {
+          let j = i + 1;
+          while (j < normalized.length) {
+            const next = normalized[j];
+            const after = normalized[j + 1] || '';
+            if (isAsciiWordChar(next) || (isAsciiWordJoiner(next) && isAsciiWordChar(after))) {
+              j += 1;
+              continue;
+            }
+            break;
+          }
+          tokens.push(normalized.slice(i, j));
+          i = j;
+          continue;
+        }
+
+        tokens.push(ch);
+        i += 1;
+      }
+
+      return tokens;
+    };
+
+    const wrapLinesByMeasure = (
+      text: string,
+      maxWidth: number,
+      measure: (value: string) => number
+    ) => {
+      const lines: string[] = [];
+      const tokens = tokenizeForCanvasWrap(text);
+      if (tokens.length === 0) return lines;
+
+      const pushLine = (value: string) => {
+        const trimmed = value.trim();
+        if (trimmed) lines.push(trimmed);
+      };
+
+      const append = (base: string, token: string) => {
+        if (!base && token === ' ') return '';
+        if (!base) return token.trimStart();
+        if (token === ' ' && base.endsWith(' ')) return base;
+        return base + token;
+      };
 
       let line = '';
-      for (const ch of normalized.split('')) {
-        const next = line + ch;
-        if (ctx.measureText(next).width <= maxWidth) {
-          line = next;
+      for (const token of tokens) {
+        const candidate = append(line, token);
+        if (!candidate) continue;
+
+        if (measure(candidate) <= maxWidth) {
+          line = candidate;
           continue;
         }
 
-        if (line && forbiddenLineStart.has(ch)) {
-          let moved = '';
-          while (line.length > 1 && ctx.measureText(line + ch).width > maxWidth) {
-            moved = line.slice(-1) + moved;
-            line = line.slice(0, -1);
-          }
-          if (ctx.measureText(line + ch).width <= maxWidth) {
-            lines.push(line + ch);
-            line = moved || '';
-            continue;
-          }
-        }
-
-        if (line && openingChars.has(line.slice(-1))) {
-          const open = line.slice(-1);
-          const rest = line.slice(0, -1);
-          if (rest) lines.push(rest);
-          line = open + ch;
+        if (line && forbiddenLineStart.has(token[0])) {
+          pushLine(candidate);
+          line = '';
           continue;
         }
 
-        if (line) lines.push(line);
-        line = ch;
-      }
-      if (line) lines.push(line);
-
-        for (let i = 1; i < lines.length; i++) {
-        let curr = lines[i] || '';
-        let prev = lines[i - 1] || '';
-        if (!curr || !prev) continue;
-
-        const needsFix = () => curr.length <= 1 || forbiddenLineStart.has(curr[0]);
-        let guard = 0;
-          while (guard < 10 && needsFix() && prev.length > 1) {
-          let take = curr.length <= 1 ? 2 : 1;
-            take = Math.min(Math.max(take, prev.length === 2 ? 2 : 1), prev.length - 1);
-          let segment = prev.slice(-take);
-          while (segment && forbiddenLineStart.has(segment[0]) && take < prev.length - 1) {
-            take += 1;
-            segment = prev.slice(-take);
-          }
-          if (!segment) break;
-
-          const nextPrev = prev.slice(0, -take);
-          const nextCurr = segment + curr;
-
-            if ((nextPrev || '').trim().length < 2) break;
-          if (ctx.measureText(nextCurr).width > maxWidth) break;
-          if (forbiddenLineStart.has(nextCurr[0])) break;
-
-          prev = nextPrev;
-          curr = nextCurr;
-          guard += 1;
+        if (line && openingChars.has(line.trimEnd().slice(-1))) {
+          const trimmedLine = line.trimEnd();
+          const open = trimmedLine.slice(-1);
+          const rest = trimmedLine.slice(0, -1);
+          pushLine(rest);
+          line = open + token;
+          continue;
         }
 
-        lines[i - 1] = prev;
-        lines[i] = curr;
+        if (!line) {
+          let chunk = '';
+          for (const ch of token.split('')) {
+            const next = chunk + ch;
+            if (!chunk || measure(next) <= maxWidth || forbiddenLineStart.has(ch) || closingChars.has(ch)) {
+              chunk = next;
+              continue;
+            }
+            pushLine(chunk);
+            chunk = ch;
+          }
+          line = chunk;
+          continue;
+        }
+
+        pushLine(line);
+        line = token.trimStart();
       }
+      pushLine(line);
 
       return lines;
     };
+
+    const wrapLines = (ctx: CanvasRenderingContext2D, text: string, maxWidth: number) =>
+      wrapLinesByMeasure(text, maxWidth, (value) => ctx.measureText(value).width);
 
     const roundRectPath = (
       ctx: CanvasRenderingContext2D,
@@ -743,8 +887,8 @@ export default function ReportPage() {
       if (!ctx) throw new Error('No 2d context');
 
       const archetype = (data.archetype || '').trim();
-      const powers = buildSharePowers(data).slice(0, 3);
-      const rawRoles = buildSharePowers(data)
+      const powers = buildSharePowers(data, shareFallbackRoles).slice(0, 3);
+      const rawRoles = buildSharePowers(data, shareFallbackRoles)
         .flatMap((p) => p.roles)
         .filter(Boolean)
         .map((r) => r.replace(/（.*?）|\(.*?\)/g, '').trim())
@@ -868,22 +1012,83 @@ export default function ReportPage() {
         const normalized = (text || '').replace(/\s+/g, ' ').trim();
         if (!normalized) return '';
         if (normalized.length <= hardLimit) return ensureSentenceEnd(normalized);
-        const windowStart = Math.max(0, hardLimit - 60);
-        const windowText = normalized.slice(windowStart, hardLimit);
-        const match = windowText.match(/.*[。！？；;]/);
-        if (match && match[0]) {
-          const cut = windowStart + match[0].length;
-          return ensureSentenceEnd(normalized.slice(0, cut).trim());
+
+        const softLimit = Math.min(hardLimit, normalized.length);
+        const lowerBound = Math.max(12, Math.floor(softLimit * 0.48));
+        const findLastCut = (pattern: RegExp) => {
+          let best = -1;
+          for (let i = 0; i < softLimit; i++) {
+            const ch = normalized[i];
+            if (pattern.test(ch) && i + 1 >= lowerBound) best = i + 1;
+          }
+          return best;
+        };
+
+        const sentenceCut = findLastCut(/[。！？；;!?…]/);
+        if (sentenceCut > 0) {
+          return normalized.slice(0, sentenceCut).trim();
         }
-        const lastComma = Math.max(windowText.lastIndexOf('，'), windowText.lastIndexOf(','));
-        if (lastComma > 20) {
-          return ensureSentenceEnd(normalized.slice(0, windowStart + lastComma).trimEnd());
+
+        const clauseCut = findLastCut(/[，,、：:]/);
+        if (clauseCut > 0) {
+          const excerpt = normalized.slice(0, clauseCut).trim();
+          return /[，,、：:]$/.test(excerpt) ? excerpt.replace(/[，,、：:]+$/, '…') : `${excerpt}…`;
         }
-        const lastSpace = windowText.lastIndexOf(' ');
-        if (lastSpace > 30) {
-          return ensureSentenceEnd(normalized.slice(0, windowStart + lastSpace).trimEnd());
+
+        const tokenBoundary = (() => {
+          for (let i = softLimit; i >= lowerBound; i--) {
+            const prev = normalized[i - 1] || '';
+            const next = normalized[i] || '';
+            if (!prev) continue;
+            if (/\s/.test(prev)) return i - 1;
+            if (isAsciiWordChar(prev) && isAsciiWordChar(next)) continue;
+            if (isAsciiWordChar(prev) && isAsciiWordJoiner(next)) continue;
+            if (isAsciiWordJoiner(prev) && isAsciiWordChar(next)) continue;
+            if (isAsciiWordChar(prev) && /[\u4e00-\u9fff]/.test(next)) return i;
+            if (/[\u4e00-\u9fff]/.test(prev) && isAsciiWordChar(next)) return i;
+          }
+          return -1;
+        })();
+        if (tokenBoundary > 0) {
+          return normalized.slice(0, tokenBoundary).trim().replace(/[，,、：:]+$/, '') + '…';
         }
-        return ensureSentenceEnd(normalized.slice(0, hardLimit).trimEnd());
+
+        const fallback = normalized.slice(0, softLimit).trim().replace(/[，,、：:]+$/, '');
+        if (!fallback) return '';
+        if (/[。！？；;.!?…]$/.test(fallback)) return fallback;
+        return `${fallback}…`;
+      };
+
+      const closeExcerpt = (text: string) => {
+        const t = (text || '').trim();
+        if (!t) return '';
+        if (t.endsWith('…')) return t;
+        return ensureSentenceEnd(t);
+      };
+
+      const takeCutExcerpt = (text: string, cut: number) => {
+        const excerpt = (text || '').slice(0, cut).trim();
+        if (!excerpt) return '';
+        if (/[。！？；;.!?…]$/.test(excerpt)) return excerpt;
+        if (/[，,、：:]$/.test(excerpt)) return excerpt.replace(/[，,、：:]+$/, '…');
+        if (cut < text.length) return `${excerpt}…`;
+        return closeExcerpt(excerpt);
+      };
+
+      const visuallyClampLines = (
+        lines: string[],
+        maxLines: number,
+        maxWidth: number,
+        tracking: number
+      ) => {
+        const kept = lines.slice(0, maxLines).filter(Boolean);
+        if (!kept.length) return kept;
+        if (lines.length <= maxLines) return kept;
+        const last = kept[kept.length - 1].replace(/[，,、：:。！？；;.!?…]+$/, '') + '…';
+        kept[kept.length - 1] = tracking
+          ? ellipsizeToWidthWithTracking(last, maxWidth, tracking)
+          : ellipsizeToWidth(last, maxWidth);
+        return kept;
       };
 
       const fitTextToMaxLines = (text: string, maxWidth: number, maxLines: number, initialLimit: number) => {
@@ -1007,103 +1212,8 @@ export default function ReportPage() {
         return w;
       };
 
-      const wrapLinesWithTracking = (text: string, maxWidth: number, tracking: number) => {
-        const lines: string[] = [];
-        const normalized = (text || '').replace(/\s+/g, ' ').trim();
-        if (!normalized) return lines;
-
-        const forbiddenLineStart = new Set([
-          '，',
-          '。',
-          '、',
-          '；',
-          '：',
-          '！',
-          '？',
-          '）',
-          '】',
-          '』',
-          '”',
-          '’',
-          ',',
-          '.',
-          ';',
-          '!',
-          '?',
-          '%',
-          '…',
-        ]);
-        const openingChars = new Set(['“', '‘', '（', '【', '《', '"', "'"]);
-
-        let line = '';
-        for (const ch of normalized.split('')) {
-          const next = line + ch;
-          if (measureTextWithTracking(next, tracking) <= maxWidth) {
-            line = next;
-            continue;
-          }
-
-          if (line && forbiddenLineStart.has(ch)) {
-            let moved = '';
-            while (line.length > 1 && measureTextWithTracking(line + ch, tracking) > maxWidth) {
-              moved = line.slice(-1) + moved;
-              line = line.slice(0, -1);
-            }
-            if (measureTextWithTracking(line + ch, tracking) <= maxWidth) {
-              lines.push(line + ch);
-              line = moved || '';
-              continue;
-            }
-          }
-
-          if (line && openingChars.has(line.slice(-1))) {
-            const open = line.slice(-1);
-            const rest = line.slice(0, -1);
-            if (rest) lines.push(rest);
-            line = open + ch;
-            continue;
-          }
-
-          if (line) lines.push(line);
-          line = ch;
-        }
-        if (line) lines.push(line);
-
-        for (let i = 1; i < lines.length; i++) {
-          let curr = lines[i] || '';
-          let prev = lines[i - 1] || '';
-          if (!curr || !prev) continue;
-
-          const needsFix = () => curr.length <= 1 || forbiddenLineStart.has(curr[0]);
-          let guard = 0;
-          while (guard < 10 && needsFix() && prev.length > 1) {
-            let take = curr.length <= 1 ? 2 : 1;
-            take = Math.min(Math.max(take, prev.length === 2 ? 2 : 1), prev.length - 1);
-            let segment = prev.slice(-take);
-            while (segment && forbiddenLineStart.has(segment[0]) && take < prev.length - 1) {
-              take += 1;
-              segment = prev.slice(-take);
-            }
-            if (!segment) break;
-
-            const nextPrev = prev.slice(0, -take);
-            const nextCurr = segment + curr;
-
-            if ((nextPrev || '').trim().length < 2) break;
-            if (measureTextWithTracking(nextCurr, tracking) > maxWidth) break;
-            if (forbiddenLineStart.has(nextCurr[0])) break;
-
-            prev = nextPrev;
-            curr = nextCurr;
-            guard += 1;
-          }
-
-          lines[i - 1] = prev;
-          lines[i] = curr;
-        }
-
-        return lines;
-      };
+      const wrapLinesWithTracking = (text: string, maxWidth: number, tracking: number) =>
+        wrapLinesByMeasure(text, maxWidth, (value) => measureTextWithTracking(value, tracking));
 
       const fitFontSizeToWidthWithTracking = (
         text: string,
@@ -1314,9 +1424,8 @@ export default function ReportPage() {
         for (const tracking of trackings) {
           let best: { lines: string[]; len: number } | null = null;
           for (const cut of candidates) {
-            let excerpt = compressed.slice(0, cut).trim();
+            const excerpt = takeCutExcerpt(compressed, cut);
             if (!excerpt) continue;
-            if (!/[。！？；;.!?…]$/.test(excerpt)) excerpt = ensureSentenceEnd(excerpt);
             const ls = wrapByTracking(excerpt, tracking);
             if (ls.length > subtitleMaxLines) continue;
             if (hasBadLine(ls)) continue;
@@ -1331,7 +1440,10 @@ export default function ReportPage() {
 
         const fallbackTracking = -0.8;
         const fallbackLines = wrapByTracking(ensureSentenceEnd(compressed), fallbackTracking);
-        return { lines: fallbackLines.slice(0, subtitleMaxLines), tracking: fallbackTracking };
+        return {
+          lines: visuallyClampLines(fallbackLines, subtitleMaxLines, innerW, fallbackTracking),
+          tracking: fallbackTracking,
+        };
       };
 
       const pickBlockText = (raw: string, maxWidth: number, maxLines: number, minLines: number) => {
@@ -1374,9 +1486,8 @@ export default function ReportPage() {
         const pickByCuts = (cuts: number[], tracking: number) => {
           let best: { lines: string[]; len: number } | null = null;
           for (const cut of cuts) {
-            let excerpt = compressed.slice(0, cut).trim();
+            const excerpt = takeCutExcerpt(compressed, cut);
             if (!excerpt) continue;
-            if (!/[。！？；;.!?…]$/.test(excerpt)) excerpt = ensureSentenceEnd(excerpt);
             const ls = wrapAt(excerpt, tracking);
             if (ls.length > maxLines) continue;
             if (hasBad(ls)) continue;
@@ -1406,7 +1517,10 @@ export default function ReportPage() {
 
         const fallbackTracking = -0.8;
         const fallbackLines = wrapAt(ensureSentenceEnd(compressed), fallbackTracking);
-        return { lines: fallbackLines.slice(0, maxLines), tracking: fallbackTracking };
+        return {
+          lines: visuallyClampLines(fallbackLines, maxLines, maxWidth, fallbackTracking),
+          tracking: fallbackTracking,
+        };
       };
 
       const subtitlePicked = pickSubtitle(subtitleSource);
@@ -1823,7 +1937,7 @@ export default function ReportPage() {
         setIsRenderingShare(false);
       }
     };
-  }, [report, reportArchetype, shareImgUrl, shareUrl]);
+  }, [pathPreview, report, reportArchetype, shareImgUrl, shareUrl]);
 
   const openShare = () => {
     setShareOpen(true);
@@ -1889,7 +2003,29 @@ export default function ReportPage() {
     }
   };
 
-  if (!report) return null;
+  if (isBootstrapping) {
+    return (
+      <main className="min-h-screen bg-gradient-to-br from-indigo-50/50 via-white to-emerald-50/50 px-4 py-8 md:py-12">
+        <div className="max-w-6xl mx-auto">
+          <div className="flex items-center justify-center rounded-3xl border border-black/5 bg-white/70 py-24 text-sm text-muted-foreground shadow-sm">
+            正在加载报告内容...
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (!report) {
+    return (
+      <main className="min-h-screen bg-gradient-to-br from-indigo-50/50 via-white to-emerald-50/50 px-4 py-8 md:py-12">
+        <div className="max-w-6xl mx-auto">
+          <div className="flex items-center justify-center rounded-3xl border border-black/5 bg-white/70 py-24 text-sm text-muted-foreground shadow-sm">
+            暂无可展示的报告内容
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen text-foreground px-4 py-8 md:py-12 bg-gradient-to-br from-indigo-50/50 via-white to-emerald-50/50 relative">
@@ -1917,6 +2053,11 @@ export default function ReportPage() {
               <p className="text-sm text-muted-foreground mt-1">
                 My Career Panorama
               </p>
+              {report.generated_by === 'fallback' ? (
+                <span className="mt-3 inline-flex rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">
+                  轻量版报告
+                </span>
+              ) : null}
             </div>
           </div>
           <Button
@@ -1942,7 +2083,7 @@ export default function ReportPage() {
               <h2 className="text-3xl sm:text-4xl font-bold text-primary tracking-tight">
                 {report.archetype}
               </h2>
-              <FormatSummary text={report.summary} />
+              <FormatSummary text={buildDisplaySummary(report)} />
             </CardContent>
           </Card>
 
@@ -1971,9 +2112,12 @@ export default function ReportPage() {
         <section className="grid md:grid-cols-12 gap-6">
           <Card className="order-2 md:order-1 md:col-span-8 glass-card border-white/60 bg-white/80 shadow-sm hover:shadow-md transition-all duration-500">
             <CardHeader className="p-6 pb-3 border-b border-black/5">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-emerald-600" />
+              <div className="grid grid-cols-[1rem_1fr] gap-x-2 gap-y-1.5">
+                <Sparkles className="mt-0.5 w-4 h-4 text-emerald-600" />
                 <h3 className="text-base font-semibold text-foreground/80">隐藏天赋与适配场景</h3>
+                <p className="col-start-2 text-xs leading-relaxed text-muted-foreground/70">
+                  点击职位标签可查看细节，选择两个职位可对比
+                </p>
               </div>
             </CardHeader>
             <CardContent className="p-6 space-y-4">
@@ -2010,9 +2154,14 @@ export default function ReportPage() {
                          </p>
                       </div>
                     </div>
-                    {power.potential_roles && power.potential_roles.length > 0 && (
+                    {(() => {
+                      const roles = power.potential_roles?.length
+                        ? power.potential_roles
+                        : fallbackRoleGroups[index % Math.max(fallbackRoleGroups.length, 1)] || [];
+                      if (roles.length === 0) return null;
+                      return (
                         <div className="ml-12 flex flex-wrap gap-2 pt-1">
-                          {power.potential_roles.map((role, j) => {
+                          {roles.map((role, j) => {
                             const isSelected = selectedRoles.includes(role);
                             return (
                               <button
@@ -2040,7 +2189,8 @@ export default function ReportPage() {
                             );
                           })}
                         </div>
-                    )}
+                      );
+                    })()}
                   </div>
                 );
               })}
@@ -2140,7 +2290,10 @@ export default function ReportPage() {
           <div className="glass-card bg-white/90 backdrop-blur-xl border border-white/50 shadow-2xl rounded-2xl p-4 flex items-center justify-between gap-4 ring-1 ring-black/5">
             <div className="flex flex-col gap-1">
               <span className="text-sm font-medium text-foreground">
-                已选择 {selectedRoles.length} 个职业方向
+                {selectedRoles.length === 1 ? '已选择 1 个职业方向' : '已选择 2 个职业方向'}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {selectedRoles.length === 1 ? '可再选一个职业进行对比' : '会从匹配度、优势及挑战维度帮你分析决策'}
               </span>
               <div className="flex flex-wrap gap-1.5">
                 {selectedRoles.map(role => (
@@ -2178,7 +2331,7 @@ export default function ReportPage() {
                 <div className="flex flex-col items-start">
                   <span className="flex items-center text-sm font-semibold">
                     <Sparkles className="w-3.5 h-3.5 mr-2" />
-                    {selectedRoles.length === 1 ? '深度解析该职业' : '对比分析这两个职业'}
+                    {selectedRoles.length === 1 ? '深度解析该职业' : '查看职业对比'}
                   </span>
                 </div>
               )}
@@ -2493,6 +2646,12 @@ export default function ReportPage() {
           </div>
         </div>
       )}
+
+      {pathPreview ? (
+        <div className="mx-auto mt-10 w-full max-w-6xl px-4 pb-10 md:px-6">
+          <CareerPathPreviewCard preview={pathPreview} onOpen={() => router.push('/coach/path')} />
+        </div>
+      ) : null}
     </main>
   );
 }
