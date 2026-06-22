@@ -2,13 +2,20 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { streamText, tool } from 'ai';
 import { z } from 'zod';
 import { GENTLE_BREEZE_V4_CHAT_PROMPT } from '@/lib/prompt-versions';
+import { checkRateLimitDistributed, getClientIp, normalizeMessages, rateLimitResponse } from '@/lib/rate-limit';
 
 export const runtime = 'edge';
 export const maxDuration = 30;
 export const preferredRegion = ['hkg1', 'sin1', 'iad1']; // Prioritize Asia regions if available on plan
 
+const CONTINUE_CHAT_CONTROL_PREFIX = '[EchoTalent UI Action: continue_current_topic]';
+
 export async function POST(req: Request) {
   try {
+    const ip = getClientIp(req);
+    const limit = await checkRateLimitDistributed({ key: `chat:${ip}`, limit: 30, windowMs: 10 * 60 * 1000 });
+    if (!limit.ok) return rateLimitResponse(limit.resetAt);
+
     const { messages } = (await req.json()) as { messages?: unknown };
     if (!Array.isArray(messages)) {
       return new Response(JSON.stringify({ error: 'Invalid messages' }), {
@@ -17,19 +24,20 @@ export async function POST(req: Request) {
       });
     }
 
-    type ChatMessage = { role: 'user' | 'assistant' | 'system'; content: string };
-    const chatMessages: ChatMessage[] = messages
-      .map((m) => {
-        const mm = m as { role?: unknown; content?: unknown };
-        const role = mm.role === 'user' || mm.role === 'assistant' || mm.role === 'system' ? mm.role : null;
-        const content = typeof mm.content === 'string' ? mm.content : null;
-        if (!role || !content) return null;
-        return { role, content };
-      })
-      .filter((m): m is ChatMessage => Boolean(m));
+    const chatMessages = normalizeMessages(messages, {
+      maxMessages: 40,
+      maxContentLength: 1500,
+      allowSystem: false,
+    });
     if (chatMessages.length === 0) {
       return new Response(JSON.stringify({ error: 'Invalid messages' }), {
         status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (!process.env.DASHSCOPE_API_KEY) {
+      return new Response(JSON.stringify({ error: 'Missing model API key' }), {
+        status: 500,
         headers: { 'Content-Type': 'application/json' },
       });
     }
@@ -39,14 +47,29 @@ export async function POST(req: Request) {
       apiKey: process.env.DASHSCOPE_API_KEY,
     });
 
+    const isContinueChatAction = chatMessages.some(
+      (message) => message.role === 'user' && message.content.startsWith(CONTINUE_CHAT_CONTROL_PREFIX)
+    );
+
     let systemPrompt = GENTLE_BREEZE_V4_CHAT_PROMPT;
     systemPrompt += `
       **Tools**:
       - You have access to a "getSalaryInsight" tool. If the user asks about salary trends or market rates for a specific role and city, USE THIS TOOL to get data, then incorporate the findings into your empathetic response. Do not make up numbers if you can use the tool.
       - You have access to a "enableReportButton" tool. Call this tool simultaneously when you ask the user if they want to generate the report.
+      - Never write the full structured career report in chat. If the user wants a report, guide them to click the product report button.
       
       Start by welcoming them if it's a fresh conversation (though the UI may show a welcome message).
     `;
+    if (isContinueChatAction) {
+      systemPrompt += `
+        **Continue-chat UI action**:
+        The latest user message may be an EchoTalent UI action rather than a real user utterance.
+        If it starts with "${CONTINUE_CHAT_CONTROL_PREFIX}", treat it only as a request to continue the current conversation.
+        Do not interpret that text as user self-disclosure. Do not start a new topic.
+        Resume from the most recent real user concern and ask one gentle, concrete follow-up question.
+        Do not mention the report button unless the user asks about the report.
+      `;
+    }
 
     const result = streamText({
       model: openai('qwen-plus'),
