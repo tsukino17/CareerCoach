@@ -6,6 +6,8 @@
   - 修复 `/chat` 顶部版本标识仍显示旧版本的问题，并将聊天模型默认切到 `qwen-turbo`、减少工具轮次，降低普通对话首字等待。
   - 为分布式限流 RPC 增加 900ms 超时兜底；Supabase 或跨区网络抖动时会退回本地内存限流，避免发送消息后先卡在限流检查。
   - 验证：热修已推送到 `origin/v4.5-sharing`；线上 `https://echotalent.fun/chat` 仍显示 `V4.5.1 SHARE`，说明生产部署尚未使用这条热修分支，需要继续确认 Vercel 生产分支或合并到生产分支后再验收。
+  - 用户反馈生产 `/chat` 仍出现通用对话错误后，撤回未经质量确认的 `qwen-turbo` 默认模型，恢复为 `qwen-plus` 与 `maxSteps: 5`，优先保证会话质量和工具调用稳定性。
+  - 为聊天流式响应增加服务端 `[chat stream error]` 日志与中文错误提示，避免后续只在前端看到 `An error occurred.` 而无法定位真实模型/流式错误。
 
 - **报告分享图文字排版修复**:
   - 修复 [app/report/page.tsx](/Users/sue/Documents/trae_projects/career/app/report/page.tsx) 的 Canvas 分享图换行逻辑：从逐字切分改为 token 级换行，英文单词/数字组合保持整体，中文按字排版，标点跟随上一段文本，避免行首标点和英文被截断。

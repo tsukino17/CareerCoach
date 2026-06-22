@@ -9,7 +9,7 @@ export const maxDuration = 30;
 export const preferredRegion = ['hkg1', 'sin1', 'iad1']; // Prioritize Asia regions if available on plan
 
 const CONTINUE_CHAT_CONTROL_PREFIX = '[EchoTalent UI Action: continue_current_topic]';
-const CHAT_MODEL = process.env.CHAT_MODEL || 'qwen-turbo';
+const CHAT_MODEL = process.env.CHAT_MODEL || 'qwen-plus';
 
 export async function POST(req: Request) {
   try {
@@ -119,10 +119,16 @@ export async function POST(req: Request) {
           },
         }),
       },
-      maxSteps: 2,
+      maxSteps: 5,
     });
   
-    return result.toDataStreamResponse();
+    return result.toDataStreamResponse({
+      getErrorMessage: (error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error('[chat stream error]', message);
+        return '聊天服务暂时连接不稳定，请稍后再试。';
+      },
+    });
   } catch (error) {
     console.error('API Error:', error);
     return new Response(JSON.stringify({ error: 'Failed to process request' }), {

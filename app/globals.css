@@ -61,6 +61,7 @@
   
   body {
     @apply bg-background text-foreground selection:bg-primary/20;
+    font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     background-image: 
       radial-gradient(at 0% 0%, hsla(13, 65%, 92%, 1) 0px, transparent 50%),
       radial-gradient(at 100% 0%, hsla(170, 45%, 90%, 1) 0px, transparent 50%),
