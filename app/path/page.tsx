@@ -2027,6 +2027,7 @@ export default function PathPage() {
     setSelectedCalendarDate(nextReflection.dateKey);
     setExpandedPanels((current) => ({ ...current, calendar: true }));
     setReflectionSavedAt(now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
+    setReflectionText('');
   };
 
   return (
@@ -2059,7 +2060,7 @@ export default function PathPage() {
               </div>
               <h1 className="mt-4 text-3xl font-bold tracking-tight text-[#2A6FA3]">把报告里的方向变成可推进的职业路径</h1>
               <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
-                中间这块会继续给你留位置，用来放愿景板和按岗位整理的资源支持。右侧是现实路径教练，先帮你判断哪条路更值得先碰。
+                在这里整理你感兴趣的岗位、已有经验和可用资源。右侧教练会和你逐项核对岗位需求、现实条件与下一步，帮你找到更适合优先推进的方向。
               </p>
             </div>
 
@@ -2306,7 +2307,7 @@ export default function PathPage() {
           </div>
 
           <aside id="coach" className="order-1 min-w-0 space-y-4 min-[768px]:order-2">
-            <div className="rounded-[1.6rem] border border-[#86B8FF]/18 bg-white/76 shadow-[0_18px_55px_rgba(15,23,42,0.07)] backdrop-blur min-[768px]:sticky min-[768px]:top-4">
+            <div className="overflow-hidden rounded-[1.6rem] border border-[#86B8FF]/18 bg-white/76 shadow-[0_18px_55px_rgba(15,23,42,0.07)] backdrop-blur min-[768px]:sticky min-[768px]:top-4 min-[768px]:flex min-[768px]:h-[calc(100vh-2rem)] min-[768px]:max-h-[calc(100dvh-2rem)] min-[768px]:flex-col">
               <div className="flex items-center justify-between border-b border-slate-200/70 px-5 py-4">
                 <div>
                   <div className="flex items-center gap-2 text-sm font-semibold text-[#2A6FA3]">
@@ -2317,7 +2318,7 @@ export default function PathPage() {
                 </div>
               </div>
 
-              <div ref={messagesScrollRef} className="max-h-[68vh] scroll-pb-32 overflow-y-auto px-5 py-4 pb-32">
+              <div ref={messagesScrollRef} className="scroll-pb-8 overflow-y-auto px-5 py-4 min-[768px]:min-h-0 min-[768px]:flex-1">
                 {locked ? (
                   <div className="mb-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm leading-7 text-slate-500">
                     你还没有基础资料，所以这里先锁住。去完成天赋教练对话后，现实路径教练会自动接上。
@@ -2358,7 +2359,7 @@ export default function PathPage() {
                 </div>
               </div>
 
-              <div className="border-t border-slate-200/70 p-4">
+              <div className="shrink-0 border-t border-slate-200/70 p-4">
                 <textarea
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
