@@ -136,25 +136,8 @@ function buildShareDescription(summary: string): string {
   const hardLimit = 180;
   if (normalized.length <= hardLimit) return normalized;
 
-  const windowStart = Math.max(0, hardLimit - 60);
-  const windowText = normalized.slice(windowStart, hardLimit);
-  const match = windowText.match(/.*[。！？；;]/);
-  if (match && match[0]) {
-    const cut = windowStart + match[0].length;
-    return normalized.slice(0, cut).trim();
-  }
-
-  const lastComma = Math.max(windowText.lastIndexOf('，'), windowText.lastIndexOf(','));
-  if (lastComma > 20) {
-    return (normalized.slice(0, windowStart + lastComma).trimEnd() + '。').trim();
-  }
-
-  const lastSpace = windowText.lastIndexOf(' ');
-  if (lastSpace > 30) {
-    return (normalized.slice(0, windowStart + lastSpace).trimEnd() + '。').trim();
-  }
-
-  return (normalized.slice(0, hardLimit).trimEnd() + '。').trim();
+  const sentence = normalized.match(/^[\s\S]*?[。！？；;]/)?.[0]?.trim();
+  return sentence && sentence.length <= hardLimit ? sentence : normalized;
 }
 
 function RadarChart({ stats }: { stats: RPGStat[] }) {
@@ -670,14 +653,14 @@ export default function ReportPage() {
         .filter(Boolean);
       const roles = Array.from(new Set(rawRoles)).slice(0, 5);
       const payload = JSON.stringify({
-        v: 30,
+        v: 33,
         a: data.archetype || '',
         s: buildShareDescription(data.summary || ''),
         p: powers,
         r: roles,
         u: url,
       });
-      return `sharecard-a-v30:${fnv1a(payload)}`;
+      return `sharecard-a-v33:${fnv1a(payload)}`;
     };
 
     const shareCacheRequest = (key: string) =>
@@ -976,9 +959,9 @@ export default function ReportPage() {
       const ensureSentenceEnd = (text: string) => {
         const t = (text || '').replace(/\s+/g, ' ').trim();
         if (!t) return '';
-        if (/[。！？；;.!?…]$/.test(t)) return t;
+        if (/[。！？.!?]$/.test(t)) return t;
         if (t.length <= 12) return t;
-        if (/[，,、]$/.test(t)) return (t.slice(0, -1).trimEnd() + '。').trim();
+        if (/[，,、；;：:]$/.test(t)) return (t.slice(0, -1).trimEnd() + '。').trim();
         return (t + '。').trim();
       };
 
@@ -1008,182 +991,103 @@ export default function ReportPage() {
         return t;
       };
 
-      const takeMeaningful = (text: string, hardLimit: number) => {
-        const normalized = (text || '').replace(/\s+/g, ' ').trim();
-        if (!normalized) return '';
-        if (normalized.length <= hardLimit) return ensureSentenceEnd(normalized);
-
-        const softLimit = Math.min(hardLimit, normalized.length);
-        const lowerBound = Math.max(12, Math.floor(softLimit * 0.48));
-        const findLastCut = (pattern: RegExp) => {
-          let best = -1;
-          for (let i = 0; i < softLimit; i++) {
-            const ch = normalized[i];
-            if (pattern.test(ch) && i + 1 >= lowerBound) best = i + 1;
-          }
-          return best;
-        };
-
-        const sentenceCut = findLastCut(/[。！？；;!?…]/);
-        if (sentenceCut > 0) {
-          return normalized.slice(0, sentenceCut).trim();
-        }
-
-        const clauseCut = findLastCut(/[，,、：:]/);
-        if (clauseCut > 0) {
-          const excerpt = normalized.slice(0, clauseCut).trim();
-          return /[，,、：:]$/.test(excerpt) ? excerpt.replace(/[，,、：:]+$/, '…') : `${excerpt}…`;
-        }
-
-        const tokenBoundary = (() => {
-          for (let i = softLimit; i >= lowerBound; i--) {
-            const prev = normalized[i - 1] || '';
-            const next = normalized[i] || '';
-            if (!prev) continue;
-            if (/\s/.test(prev)) return i - 1;
-            if (isAsciiWordChar(prev) && isAsciiWordChar(next)) continue;
-            if (isAsciiWordChar(prev) && isAsciiWordJoiner(next)) continue;
-            if (isAsciiWordJoiner(prev) && isAsciiWordChar(next)) continue;
-            if (isAsciiWordChar(prev) && /[\u4e00-\u9fff]/.test(next)) return i;
-            if (/[\u4e00-\u9fff]/.test(prev) && isAsciiWordChar(next)) return i;
-          }
-          return -1;
-        })();
-        if (tokenBoundary > 0) {
-          return normalized.slice(0, tokenBoundary).trim().replace(/[，,、：:]+$/, '') + '…';
-        }
-
-        const fallback = normalized.slice(0, softLimit).trim().replace(/[，,、：:]+$/, '');
-        if (!fallback) return '';
-        if (/[。！？；;.!?…]$/.test(fallback)) return fallback;
-        return `${fallback}…`;
-      };
-
-      const closeExcerpt = (text: string) => {
-        const t = (text || '').trim();
-        if (!t) return '';
-        if (t.endsWith('…')) return t;
-        return ensureSentenceEnd(t);
-      };
-
-      const takeCutExcerpt = (text: string, cut: number) => {
-        const excerpt = (text || '').slice(0, cut).trim();
-        if (!excerpt) return '';
-        if (/[。！？；;.!?…]$/.test(excerpt)) return excerpt;
-        if (/[，,、：:]$/.test(excerpt)) return excerpt.replace(/[，,、：:]+$/, '…');
-        if (cut < text.length) return `${excerpt}…`;
-        return closeExcerpt(excerpt);
-      };
-
-      const visuallyClampLines = (
-        lines: string[],
-        maxLines: number,
-        maxWidth: number,
-        tracking: number
-      ) => {
-        const kept = lines.slice(0, maxLines).filter(Boolean);
-        if (!kept.length) return kept;
-        if (lines.length <= maxLines) return kept;
-        const last = kept[kept.length - 1].replace(/[，,、：:。！？；;.!?…]+$/, '') + '…';
-        kept[kept.length - 1] = tracking
-          ? ellipsizeToWidthWithTracking(last, maxWidth, tracking)
-          : ellipsizeToWidth(last, maxWidth);
-        return kept;
-      };
-
-      const fitTextToMaxLines = (text: string, maxWidth: number, maxLines: number, initialLimit: number) => {
-        const normalized = compressShareText(text);
+      const splitCompleteSentences = (text: string) => {
+        const normalized = normalizeShareTextBase(text);
         if (!normalized) return [];
+        const matches = normalized.match(/[^。！？.!?]+[。！？.!?]/g) || [];
+        const sentences = matches.map((s) => s.trim()).filter(Boolean);
+        if (sentences.length) return sentences;
+        return [ensureSentenceEnd(normalized)];
+      };
 
-        const firstSentenceMatch = normalized.match(/^[\s\S]*?[。！？；;]/);
-        const candidates = [
-          firstSentenceMatch?.[0]?.trim() ? ensureSentenceEnd(firstSentenceMatch[0].trim()) : '',
-          normalized,
+      const compactPhrase = (text: string, maxChars = 18) => {
+        const t = normalizeShareTextBase(text)
+          .replace(/[“”"'‘’]/g, '')
+          .replace(/能力|天赋|直觉|感知力|编码能力/g, '')
+          .replace(/\s+/g, '')
+          .trim();
+        return t.slice(0, maxChars);
+      };
+
+      const buildShareSummaryCandidates = (data: ReportData, sharePowers: SharePower[]) => {
+        const primary = sharePowers[0]?.name || data.skills?.[0] || '职业优势';
+        const secondary = sharePowers[1]?.name || data.skills?.[1] || '长期选择';
+        const third = sharePowers[2]?.name || data.skills?.[2] || '行动判断';
+        const roleText = Array.from(new Set(sharePowers.flatMap((p) => p.roles || []))).slice(0, 3).join('、');
+        const skillText = (data.skills || []).slice(0, 3).join('、');
+        return [
+          data.summary || '',
+          sharePowers.map((p) => `${p.name}：${p.description}`).join(' '),
+          roleText ? `这份报告把你的${compactPhrase(primary)}、${compactPhrase(secondary)}与${compactPhrase(third)}，对应到${roleText}等可以继续验证的现实方向。` : '',
+          skillText ? `你的核心优势集中在${skillText}，更适合进入需要理解、判断、表达和持续校准的工作场景。` : '',
+          `你的职业优势不只是某个单点技能，而是能把${compactPhrase(primary)}、${compactPhrase(secondary)}和${compactPhrase(third)}组织成稳定的判断方式。`,
+          `这份分享图浓缩了你的职业画像，重点呈现你的能力结构、偏好场景和下一步值得验证的方向。`,
         ].filter(Boolean);
-
-        for (const base of candidates) {
-          let limit = initialLimit;
-          for (let i = 0; i < 28; i++) {
-            const excerpt = takeMeaningful(base, limit);
-            const lines = wrapLines(ctx, excerpt, maxWidth);
-            if (lines.length <= maxLines) return lines;
-            limit = Math.max(24, limit - 8);
-          }
-        }
-
-        let limit = Math.min(80, initialLimit);
-        while (limit >= 12) {
-          const excerpt = takeMeaningful(normalized, limit);
-          const lines = wrapLines(ctx, excerpt, maxWidth);
-          if (lines.length <= maxLines) return lines;
-          limit -= 2;
-        }
-
-        for (let hard = 10; hard >= 4; hard--) {
-          const tiny = takeMeaningful(normalized, hard);
-          const lines = wrapLines(ctx, tiny, maxWidth);
-          if (lines.length <= maxLines) return lines;
-        }
-
-        return [ellipsizeToWidth(ensureSentenceEnd(normalized), maxWidth)];
       };
 
-      const fitTextToPreferLines = (
-        text: string,
-        maxWidth: number,
-        maxLines: number,
-        initialLimit: number,
-        minLines: number
-      ) => {
-        const normalized = compressShareText(text);
-        if (!normalized) return [];
-
-        let best: { lines: string[]; length: number } | null = null;
-        let limit = initialLimit;
-        for (let i = 0; i < 36; i++) {
-          const excerpt = takeMeaningful(normalized, limit);
-          const lines = wrapLines(ctx, excerpt, maxWidth);
-          if (lines.length <= maxLines) {
-            if (lines.length >= minLines) return lines;
-            const len = excerpt.length;
-            if (!best || lines.length > best.lines.length || (lines.length === best.lines.length && len > best.length)) {
-              best = { lines, length: len };
-            }
-          }
-          limit = Math.max(36, limit - 10);
-        }
-
-        return best?.lines ?? fitTextToMaxLines(normalized, maxWidth, maxLines, Math.min(initialLimit, 220));
+      const buildPowerSummaryCandidates = (power: SharePower) => {
+        const name = compactPhrase(power.name, 16) || '这项能力';
+        const roles = (power.roles || []).slice(0, 2).join('、');
+        return [
+          power.description,
+          roles ? `${power.description}这种优势适合在${roles}等场景中继续验证。` : '',
+          roles ? `你能把${name}落到${roles}等真实工作里，形成更清晰的判断和行动质量。` : '',
+          `你能把${name}放进具体情境里，识别真正影响结果的关键线索。`,
+          `当任务需要判断、整理和推进时，这项能力会更容易转化为稳定价值。`,
+        ].filter(Boolean);
       };
 
-      const fitTextToPreferLinesWithTracking = (
-        text: string,
+      const combineCompleteSentences = (sentences: string[], maxSentences: number) => {
+        const combos: string[] = [];
+        for (let start = 0; start < sentences.length; start++) {
+          let combined = '';
+          for (let count = 1; count <= maxSentences && start + count <= sentences.length; count++) {
+            combined += sentences[start + count - 1];
+            combos.push(combined);
+          }
+        }
+        return combos;
+      };
+
+      const pickCompleteText = (
+        rawCandidates: string[],
         maxWidth: number,
         maxLines: number,
-        initialLimit: number,
         minLines: number,
-        tracking: number
+        trackings: number[],
+        wrapAt: (text: string, tracking: number) => string[],
+        hasBad: (lines: string[]) => boolean
       ) => {
-        const normalized = compressShareText(text);
-        if (!normalized) return [];
+        const sentenceGroups = rawCandidates
+          .flatMap((candidate) => splitCompleteSentences(candidate))
+          .map((candidate) => ensureSentenceEnd(candidate.replace(/…/g, '').trim()))
+          .filter(Boolean);
+        const candidates = Array.from(new Set([...combineCompleteSentences(sentenceGroups, 3), ...sentenceGroups]));
 
-        let best: { lines: string[]; length: number } | null = null;
-        let limit = initialLimit;
-        for (let i = 0; i < 36; i++) {
-          const excerpt = takeMeaningful(normalized, limit);
-          const lines = wrapLinesWithTracking(excerpt, maxWidth, tracking);
-          if (lines.length <= maxLines) {
-            if (lines.length >= minLines) return lines;
-            const len = excerpt.length;
-            if (!best || lines.length > best.lines.length || (lines.length === best.lines.length && len > best.length)) {
-              best = { lines, length: len };
-            }
+        let best: { lines: string[]; tracking: number; score: number } | null = null;
+        for (const candidate of candidates) {
+          for (const tracking of trackings) {
+            const lines = wrapAt(candidate, tracking);
+            if (lines.length > maxLines || hasBad(lines)) continue;
+            const target = minLines;
+            const lineScore = Math.abs(lines.length - target) * 180;
+            const underfilledPenalty = lines.length < target ? (target - lines.length) * 220 : 0;
+            const lengthReward = -Math.min(candidate.length, 260) * 0.55;
+            const genericPenalty = /这份分享图|这份报告|这项能力/.test(candidate) ? 45 : 0;
+            const score = lineScore + underfilledPenalty + lengthReward + genericPenalty;
+            if (!best || score < best.score) best = { lines, tracking, score };
           }
-          limit = Math.max(36, limit - 10);
         }
 
-        if (best) return best.lines;
-        return [ellipsizeToWidthWithTracking(ensureSentenceEnd(normalized), maxWidth, tracking)];
+        if (best) return { lines: best.lines, tracking: best.tracking };
+
+        const shortest = candidates.sort((a, b) => a.length - b.length)[0] || '';
+        for (const tracking of trackings) {
+          const lines = wrapAt(shortest, tracking);
+          if (lines.length <= maxLines && !hasBad(lines)) return { lines, tracking };
+        }
+
+        return { lines: [], tracking: 0 };
       };
 
       const fitFontSizeToWidth = (
@@ -1394,59 +1298,44 @@ export default function ReportPage() {
       const pickSubtitle = (raw: string) => {
         const base = normalizeShareTextBase(raw);
         const fullTry = wrapByTracking(base, 0);
-        if (fullTry.length <= subtitleMaxLines && fullTry.length >= subtitleMinLines && !hasBadLine(fullTry)) {
+        if (
+          !base.includes('…') &&
+          /[。！？.!?]$/.test(base) &&
+          fullTry.length <= subtitleMaxLines &&
+          fullTry.length >= subtitleMinLines &&
+          !hasBadLine(fullTry)
+        ) {
           return { lines: fullTry, tracking: 0 };
         }
 
         const trackings = [0, -0.4, -0.8, -1.2];
         for (const tracking of trackings) {
           const baseLines = wrapByTracking(base, tracking);
-          if (baseLines.length <= subtitleMaxLines && baseLines.length >= subtitleMinLines && !hasBadLine(baseLines)) {
+          if (
+            !base.includes('…') &&
+            /[。！？.!?]$/.test(base) &&
+            baseLines.length <= subtitleMaxLines &&
+            baseLines.length >= subtitleMinLines &&
+            !hasBadLine(baseLines)
+          ) {
             return { lines: baseLines, tracking };
           }
         }
 
         const compressed = compressShareText(raw);
-        const sentenceCuts: number[] = [];
-        for (let i = 0; i < compressed.length; i++) {
-          const ch = compressed[i];
-          if (ch === '。' || ch === '！' || ch === '？' || ch === '；' || ch === '…') sentenceCuts.push(i + 1);
-        }
-        const clauseCuts: number[] = [];
-        for (let i = 0; i < compressed.length; i++) {
-          const ch = compressed[i];
-          if (ch === '，' || ch === '、' || ch === '：') clauseCuts.push(i + 1);
-        }
-        const candidates = Array.from(new Set<number>([...sentenceCuts, ...clauseCuts, compressed.length])).sort(
-          (a, b) => a - b
+        return pickCompleteText(
+          [compressed, ...buildShareSummaryCandidates(data, powers)],
+          innerW,
+          subtitleMaxLines,
+          subtitleMinLines,
+          trackings,
+          wrapByTracking,
+          hasBadLine
         );
-
-        for (const tracking of trackings) {
-          let best: { lines: string[]; len: number } | null = null;
-          for (const cut of candidates) {
-            const excerpt = takeCutExcerpt(compressed, cut);
-            if (!excerpt) continue;
-            const ls = wrapByTracking(excerpt, tracking);
-            if (ls.length > subtitleMaxLines) continue;
-            if (hasBadLine(ls)) continue;
-            if (ls.length >= subtitleMinLines) {
-              best = { lines: ls, len: excerpt.length };
-            } else if (!best || ls.length > best.lines.length || (ls.length === best.lines.length && excerpt.length > best.len)) {
-              best = { lines: ls, len: excerpt.length };
-            }
-          }
-          if (best && best.lines.length >= subtitleMinLines) return { lines: best.lines, tracking };
-        }
-
-        const fallbackTracking = -0.8;
-        const fallbackLines = wrapByTracking(ensureSentenceEnd(compressed), fallbackTracking);
-        return {
-          lines: visuallyClampLines(fallbackLines, subtitleMaxLines, innerW, fallbackTracking),
-          tracking: fallbackTracking,
-        };
       };
 
-      const pickBlockText = (raw: string, maxWidth: number, maxLines: number, minLines: number) => {
+      const pickBlockText = (power: SharePower, maxWidth: number, maxLines: number, minLines: number) => {
+        const raw = power.description;
         const forbiddenStart = subtitleForbiddenStart;
         const hasBad = (ls: string[]) =>
           ls.some((l) => {
@@ -1461,66 +1350,16 @@ export default function ReportPage() {
         const base = normalizeShareTextBase(raw);
         const trackings = [0, -0.4, -0.8, -1.2];
 
-        for (const tracking of trackings) {
-          const lines = wrapAt(base, tracking);
-          if (lines.length <= maxLines && !hasBad(lines) && lines.length >= minLines) {
-            return { lines, tracking };
-          }
-          if (lines.length <= maxLines && !hasBad(lines) && minLines <= 1) {
-            return { lines, tracking };
-          }
-        }
-
         const compressed = compressShareText(raw);
-        const sentenceCuts: number[] = [];
-        const clauseCuts: number[] = [];
-        for (let i = 0; i < compressed.length; i++) {
-          const ch = compressed[i];
-          if (ch === '。' || ch === '！' || ch === '？' || ch === '；' || ch === '…') sentenceCuts.push(i + 1);
-          if (ch === '，' || ch === '、' || ch === '：') clauseCuts.push(i + 1);
-        }
-        const unique = (arr: number[]) => Array.from(new Set<number>(arr)).sort((a, b) => a - b);
-        const candidatesSentence = unique([...sentenceCuts, compressed.length]);
-        const candidatesClause = unique([...clauseCuts, ...sentenceCuts, compressed.length]);
-
-        const pickByCuts = (cuts: number[], tracking: number) => {
-          let best: { lines: string[]; len: number } | null = null;
-          for (const cut of cuts) {
-            const excerpt = takeCutExcerpt(compressed, cut);
-            if (!excerpt) continue;
-            const ls = wrapAt(excerpt, tracking);
-            if (ls.length > maxLines) continue;
-            if (hasBad(ls)) continue;
-            if (!best || excerpt.length > best.len) best = { lines: ls, len: excerpt.length };
-          }
-          return best?.lines ?? null;
-        };
-
-        for (const tracking of trackings) {
-          const bySentence = pickByCuts(candidatesSentence, tracking);
-          if (bySentence && bySentence.length >= minLines) return { lines: bySentence, tracking };
-        }
-        for (const tracking of trackings) {
-          const byClause = pickByCuts(candidatesClause, tracking);
-          if (byClause && byClause.length >= minLines) return { lines: byClause, tracking };
-        }
-
-        for (const tracking of trackings) {
-          for (let limit = 220; limit >= 60; limit -= 12) {
-            const excerpt = takeMeaningful(compressed, limit);
-            const ls = wrapAt(excerpt, tracking);
-            if (ls.length > maxLines) continue;
-            if (hasBad(ls)) continue;
-            if (ls.length >= minLines) return { lines: ls, tracking };
-          }
-        }
-
-        const fallbackTracking = -0.8;
-        const fallbackLines = wrapAt(ensureSentenceEnd(compressed), fallbackTracking);
-        return {
-          lines: visuallyClampLines(fallbackLines, maxLines, maxWidth, fallbackTracking),
-          tracking: fallbackTracking,
-        };
+        return pickCompleteText(
+          [base, compressed, ...buildPowerSummaryCandidates(power)],
+          maxWidth,
+          maxLines,
+          minLines,
+          trackings,
+          wrapAt,
+          hasBad
+        );
       };
 
       const subtitlePicked = pickSubtitle(subtitleSource);
@@ -1634,14 +1473,16 @@ export default function ReportPage() {
         ctx.fillStyle = palette.muted;
         ctx.font =
           '400 24px "Noto Sans SC", system-ui, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif';
-        const picked = pickBlockText(p.description, leftW - 80, 3, 1);
+        const descX = leftX + 60;
+        const descMaxW = leftW - 108;
+        const picked = pickBlockText(p, descMaxW, 4, 3);
         let ly = py + 46;
         for (const line of picked.lines) {
-          if (picked.tracking) drawTextWithTracking(line, leftX + 60, ly, picked.tracking);
-          else ctx.fillText(line, leftX + 60, ly);
-          ly += 40;
+          if (picked.tracking) drawTextWithTracking(line, descX, ly, picked.tracking);
+          else ctx.fillText(line, descX, ly);
+          ly += picked.lines.length > 3 ? 36 : 40;
         }
-        py = ly + 28;
+        py = ly + (picked.lines.length > 3 ? 22 : 28);
         if (py > panelsTop + leftPanelH - 80) break;
       }
 
@@ -2649,7 +2490,7 @@ export default function ReportPage() {
 
       {pathPreview ? (
         <div className="mx-auto mt-10 w-full max-w-6xl px-4 pb-10 md:px-6">
-          <CareerPathPreviewCard preview={pathPreview} onOpen={() => router.push('/coach/path')} />
+          <CareerPathPreviewCard preview={pathPreview} onOpen={() => router.push('/path')} />
         </div>
       ) : null}
     </main>

@@ -12,14 +12,14 @@ export default function ActionCoachEntryOverlay() {
 
   if (!isUserCenter && !isReport) return null;
 
-  const label = isReport ? '开始行动力陪伴' : '行动力教练';
+  const label = isReport ? '探索现实路径' : '现实路径教练';
 
   return (
     <div className="fixed bottom-5 right-5 z-[200]">
       <Button
         type="button"
         variant="outline"
-        onClick={() => router.push('/coach/action')}
+        onClick={() => router.push('/path')}
         className="rounded-full border-[#86B8FF]/40 bg-[#86B8FF]/18 text-foreground shadow-sm backdrop-blur-sm hover:bg-[#86B8FF]/28 hover:border-[#86B8FF]/55 active:scale-95 transition-transform"
       >
         {label}
@@ -27,4 +27,3 @@ export default function ActionCoachEntryOverlay() {
     </div>
   );
 }
-
