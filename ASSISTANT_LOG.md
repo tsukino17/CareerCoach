@@ -1,5 +1,14 @@
 # AI 助手合作日志
 
+## 2026-07-17 v4.5.4 发布补充
+
+- 将 README 收敛为对外内容：保留项目介绍、主要功能、建议使用流程、官网链接和最新版本功能；移除环境变量、发布检查、数据库迁移文件名和内部目录结构。
+- 增加 3 张本地演示截图，展示对话、职业报告和现实路径地图，截图不含真实用户数据。
+- 解决 PR #27 与 `main` 的合并冲突，保留邮箱认证/报告认领流程并吸收稳定聊天、Analytics 和 Speed Insights 更新。
+- 删除旧的 `RELEASE_NOTES_v4.6.0.md`、`VERSION` 及本地生成物；保留仍有路由职责的 `middleware.ts`。
+- 从干净 Git 提交树部署到正确的 `career-coach` Vercel 项目，`echotalent.fun` 已切换到 `dpl_FysJhAXJbpX3n8ZKh2fWvfWdDLYq`，Production 状态 Ready。
+- 线上验证：`/`、`/chat`、`/path` 返回 200，`/api/career-path/draft` 和 `claim` 返回 405（POST 路由存在），聊天页显示 `v4.5.4`。
+
 ## 2026-07-17 发布安全规则
 
 - 将 GitHub 推送前的密钥泄漏检查写入 `AGENTS.md` 和 `DEPLOY_CHECKLIST.md`。
