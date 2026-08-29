@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { createLocalAdminSession, isLocalAdminRequest } from '@/lib/admin-auth';
 import { isAllowedOrigin } from '@/lib/request-security';
 
 export const runtime = 'nodejs';
@@ -10,9 +11,7 @@ type LocalAdminPayload = {
 
 export async function POST(req: Request) {
   try {
-    if (process.env.NODE_ENV !== 'development') {
-      return NextResponse.json({ error: '本机管理员入口仅在开发环境可用。' }, { status: 403 });
-    }
+    if (!isLocalAdminRequest(req)) return NextResponse.json({ error: '本机管理员入口仅允许本机访问。' }, { status: 403 });
     if (!isAllowedOrigin(req)) {
       return NextResponse.json({ error: 'Forbidden origin' }, { status: 403 });
     }
@@ -32,7 +31,7 @@ export async function POST(req: Request) {
       mode: 'local_admin_device',
       message: '本机管理员权限已启用，正在刷新后台。',
     });
-    response.cookies.set('local_admin_email', 'local-device-admin@echotalent.local', {
+    response.cookies.set('local_admin_session', createLocalAdminSession(), {
       httpOnly: true,
       sameSite: 'lax',
       path: '/',

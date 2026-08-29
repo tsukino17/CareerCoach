@@ -33,6 +33,8 @@
 3. 关键环境变量已经存在于 Vercel Production
 4. PR 没有 conflict
 5. 如果有数据库变更，Supabase schema/migration 已执行
+6. 本次发布包含新的 Analytics 事件接口和前端埋点链路；生产环境完成一次事件写入冒烟测试
+7. 本次发布移除生产环境的 `/admin` 页面及所有 Admin API 公网入口；Admin 仅保留本机开发访问
 
 ### GitHub 推送前安全检查
 
@@ -72,13 +74,14 @@ DASHSCOPE_API_KEY
 1. 首页 `/` 返回 200
 2. 聊天页 `/chat` 返回 200
 3. 聊天接口 `/api/chat` 在线
-4. 管理后台 `/admin` 返回 200
+4. 管理后台 `/admin` 在生产返回 404，不能通过公网访问
 5. 游客埋点接口 `/api/analytics/event` 返回 `{ "ok": true }`
-6. 管理后台接口在未登录时返回 `Admin login required`
+6. 新事件至少验证 `page_view`、`page_engagement`、`anonymous_chat_message` 和报告/路径关键事件可写入
+7. 生产环境不得暴露 Admin API；本机开发环境才验证 Admin 登录和数据展示
 
-## 管理后台验收
+## 本机 Admin 验收
 
-上线后用管理员邮箱登录 `/admin`，确认：
+发布前在本机访问 `/admin`，确认：
 
 1. 能发送管理员登录链接
 2. 登录后能进入后台
@@ -88,10 +91,15 @@ DASHSCOPE_API_KEY
 
 ## 遇到问题时先看什么
 
-### `/admin` 404
+### 生产 `/admin` 仍可访问
 
-- 多半是 PR 还没 merge 到 `main`
-- 或 Vercel production 还没部署最新 commit
+- 说明本次“移除 Admin 公网入口”的发布范围没有生效
+- 先检查路由、middleware 和 Vercel production deployment，再继续其他上线验收
+
+### 本机 `/admin` 404 或无法登录
+
+- 检查 `LOCAL_ADMIN_SECRET` 是否只存在于本机环境
+- 检查访问地址是否为 `127.0.0.1`、`localhost` 或 `::1`
 
 ### `/api/admin/insights` 500
 

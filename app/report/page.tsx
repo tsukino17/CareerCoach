@@ -36,6 +36,7 @@ import { CareerPathPreviewCard } from '@/components/career-path-preview-card';
 import {
   buildPathMapPreview,
   CHAT_STORAGE_KEY,
+  filterCareerProfileMaterialMessages,
   getOrCreateCareerDraftToken,
   readActiveCareerSample,
   REPORT_STORAGE_KEY,
@@ -43,6 +44,7 @@ import {
   type PathMapPreview,
 } from '@/lib/career-path';
 import { getDemoCaseById, isDemoModeActive, getActiveDemoCaseId } from '@/lib/demo-cases';
+import { trackEvent } from '@/lib/analytics-client';
 
 interface RPGStat {
   name: string;
@@ -420,6 +422,17 @@ export default function ReportPage() {
   const [shareImgUrl, setShareImgUrl] = useState<string | null>(null);
   const shareImgKeyRef = useRef<string | null>(null);
   const [pathPreview, setPathPreview] = useState<PathMapPreview | null>(null);
+  const reportOpenedAtRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!report) return;
+    reportOpenedAtRef.current = Date.now();
+    void trackEvent({ eventName: 'report_viewed', page: '/report', status: 'success', metadata: { reportSource: report.generated_by || 'unknown' } });
+    return () => {
+      const durationMs = reportOpenedAtRef.current ? Date.now() - reportOpenedAtRef.current : 0;
+      void trackEvent({ eventName: 'report_engagement', page: '/report', status: 'closed', metadata: { durationMs, reportSource: report.generated_by || 'unknown' } });
+    };
+  }, [report]);
 
   const fallbackRoleGroups = pathPreview?.direction_clusters?.map((cluster) => cluster.sample_roles).filter((roles) => roles.length > 0) || [];
 
@@ -446,11 +459,23 @@ export default function ReportPage() {
   useEffect(() => {
     if (!report || report.generated_by === 'fallback') return;
     let cancelled = false;
-    const basePreview = buildPathMapPreview(report);
+    let messages: Array<{ role: string; content: string }> = [];
+    try {
+      const parsedMessages = JSON.parse(window.localStorage.getItem(CHAT_STORAGE_KEY) || '[]');
+      if (Array.isArray(parsedMessages)) {
+        messages = filterCareerProfileMaterialMessages(parsedMessages)
+          .filter((message) => typeof message.content === 'string')
+          .slice(-16)
+          .map((message) => ({ role: String(message.role), content: String(message.content) }));
+      }
+    } catch {
+      messages = [];
+    }
+    const basePreview = buildPathMapPreview(report, messages);
 
     const hydrateModelPreview = async () => {
       try {
-        const data = await postJsonWithTimeout<PathMapPreview>('/api/career-path/preview', { report }, 18000, 0);
+        const data = await postJsonWithTimeout<PathMapPreview>('/api/career-path/preview', { report, messages }, 22000, 0);
         if (!cancelled) setPathPreview(data);
       } catch (error) {
         console.warn('Failed to hydrate model path preview, using base preview', error);
@@ -526,11 +551,15 @@ export default function ReportPage() {
       });
       window.clearTimeout(timeoutId);
       if (!res.ok) {
-        throw new Error('请求失败');
+        const error = new Error(`请求失败（${res.status}）`) as Error & { status?: number };
+        error.status = res.status;
+        throw error;
       }
       return (await res.json()) as T;
     } catch (e) {
-      if (retry > 0) {
+      const status = (e as Error & { status?: number })?.status;
+      // Do not immediately repeat a request after provider-side throttling.
+      if (retry > 0 && status !== 429) {
         return postJsonWithTimeout<T>(url, body, timeoutMs, retry - 1);
       }
       throw e;
@@ -1782,6 +1811,7 @@ export default function ReportPage() {
 
   const openShare = () => {
     setShareOpen(true);
+    void trackEvent({ eventName: 'report_share_opened', page: '/report', status: 'success' });
     if (typeof window === 'undefined') return;
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
@@ -1827,6 +1857,7 @@ export default function ReportPage() {
 
       if (nav.canShare?.({ files: [file] }) && nav.share) {
         await nav.share({ files: [file], title: 'EchoTalent', text: '我的职业全景画像' });
+        void trackEvent({ eventName: 'report_shared', page: '/report', status: 'success', metadata: { method: 'navigator_share', fileName } });
         return;
       }
 
@@ -1838,7 +1869,9 @@ export default function ReportPage() {
       a.click();
       a.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      void trackEvent({ eventName: 'report_image_saved', page: '/report', status: 'success', metadata: { method: 'download', fileName } });
     } catch {
+      void trackEvent({ eventName: 'report_image_saved', page: '/report', status: 'fallback', metadata: { method: 'open_image' } });
       const opened = window.open(shareImgUrl, '_blank', 'noopener,noreferrer');
       if (!opened) window.location.href = shareImgUrl;
     }

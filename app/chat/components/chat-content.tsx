@@ -235,6 +235,7 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
     const batchId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const anonymousVisitorId = getOrCreateLocalId(ANONYMOUS_VISITOR_KEY, 'anon_visitor');
     const anonymousConversationId = getOrCreateLocalId(ANONYMOUS_CONVERSATION_KEY, 'anon_conv');
+    const turnNumber = messages.filter((message) => message.role === 'user').length;
     const events: Array<{ role: 'user' | 'assistant'; content: string }> = [];
     if (userMessage?.role === 'user' && typeof userMessage.content === 'string' && userMessage.content.trim()) {
       events.push({ role: 'user', content: userMessage.content });
@@ -254,6 +255,8 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
           batchId,
           anonymousVisitorId,
           anonymousConversationId,
+          conversationId: anonymousConversationId,
+          turnNumber,
         },
       });
     }
@@ -538,6 +541,18 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
     const nextValue = (liveValue || draftInput).trim();
     if (!nextValue) return;
 
+    void trackEvent({
+      eventName: 'chat_message_sent',
+      page: '/chat',
+      status: 'success',
+      metadata: {
+        conversationId: currentConversationId,
+        turnNumber: messages.filter((message) => message.role === 'user').length + 1,
+        messageChars: nextValue.length,
+        isAnonymous: !currentConversationId,
+      },
+    });
+
     setDraftInput('');
     if (textareaRef.current) {
       textareaRef.current.value = '';
@@ -556,7 +571,7 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
       }
       throw error;
     }
-  }, [append, draftInput, isLoading]);
+  }, [append, currentConversationId, draftInput, isLoading, messages]);
 
   const handleNewChat = async () => {
     const materialMessages = getReportMaterialMessages(messages);
@@ -876,6 +891,16 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
         step: 'report_generation',
         status: 'success',
       });
+      void trackEvent({
+        eventName: 'report_generation_success',
+        page: '/chat',
+        status: 'success',
+        metadata: {
+          conversationId: currentConversationId,
+          turnNumber: materialUserMessageCount,
+          reportSource: 'model',
+        },
+      });
       void persistReportAndOpen({ ...data, generated_by: 'model' }, 'model');
     } catch (error) {
       settled = true;
@@ -886,12 +911,24 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
       setLoadingStep('');
       reportAbortControllerRef.current = null;
       console.error('Failed to generate report:', error);
-      void trackEvent({
-        eventName: 'flow_step',
+        void trackEvent({
+          eventName: 'flow_step',
         page: '/chat',
         step: 'report_generation',
         status: 'fallback',
       });
+      void trackEvent({
+        eventName: 'report_generation_failed',
+        page: '/chat',
+        status: 'error',
+        metadata: { conversationId: currentConversationId, turnNumber: materialUserMessageCount, reason: 'fallback' },
+      });
+        void trackEvent({
+          eventName: 'report_generation_success',
+          page: '/chat',
+          status: 'fallback',
+          metadata: { conversationId: currentConversationId, turnNumber: materialUserMessageCount, reportSource: 'fallback' },
+        });
       if (!hasOpenedFallback) {
         void persistReportAndOpen(buildFallbackCareerReport(materialForReport), 'fallback');
       }
@@ -918,7 +955,7 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
             <div className="flex items-center gap-3">
               <div className="flex flex-col">
                 <h1 className="text-lg font-medium tracking-tight text-foreground/80">EchoTalent</h1>
-                <span className="text-[10px] text-muted-foreground tracking-widest uppercase opacity-70">v4.5.4</span>
+                <span className="text-[10px] text-muted-foreground tracking-widest uppercase opacity-70">v4.5.5</span>
               </div>
             </div>
             <div className="flex items-center gap-1.5 sm:gap-2">

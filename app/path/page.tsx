@@ -12,9 +12,12 @@ import {
   FilePenLine,
   FileText,
   Heart,
+  EyeOff,
   LayoutGrid,
   Menu,
   PanelRight,
+  Plus,
+  RotateCcw,
   Search,
   Sparkles,
   Target,
@@ -41,6 +44,7 @@ import {
   readActiveCareerSample,
 } from '@/lib/career-path';
 import { getDemoCaseById, isDemoModeActive } from '@/lib/demo-cases';
+import { trackEvent } from '@/lib/analytics-client';
 
 type PathMessage = { role: 'user' | 'assistant'; content: string };
 type PathTask = {
@@ -93,6 +97,9 @@ const PATH_TASKS_KEY = 'career_path_micro_tasks_v1';
 const PATH_REFLECTIONS_KEY = 'career_path_daily_reflections_v1';
 const PATH_CONVERSATION_ARCHIVES_KEY = 'career_path_conversation_archives_v1';
 const PATH_CAREER_EXPLORATION_KEY = 'career_path_career_exploration_checks_v1';
+const PATH_VISIBLE_PANELS_KEY = 'career_path_visible_panels_v1';
+const DEFAULT_VISIBLE_PANELS: PanelId[] = ['overview', 'tasks', 'reflection'];
+const ALL_PANEL_IDS: PanelId[] = ['overview', 'tasks', 'reflection', 'calendar', 'modules', 'exploration', 'profile', 'updates'];
 
 const CAREER_EXPLORATION_STEPS: Array<{ id: CareerExplorationCheckId; title: string; description: string }> = [
   { id: 'jd', title: '看过 3 条岗位需求', description: '知道这个岗位通常在做什么、公司怎么描述它。' },
@@ -127,7 +134,7 @@ function buildCoachIntro(report: CareerReport | null, preview: PathMapPreview | 
   const roles = pickTopItems(preview?.direction_clusters.flatMap((cluster) => cluster.sample_roles) || extractPotentialRoles(report || ({} as CareerReport)), 3);
   const roleText = roles.length ? roles.join('、') : '一些现实岗位';
 
-  return `准备好把你的天赋转化成现实职业了吗？我是你的现实路径教练。我读取到你的天赋能力有${strengths.slice(0, 3).join('、') || '一些核心优势'}，可能适合的职业方向有${roleText}。这里面你最感兴趣、最想先去尝试和了解的职业是哪个？`;
+  return `我们先一起看看，你已经拥有的能力可以在哪些现实岗位里继续发挥。我读取到你的优势线索有${strengths.slice(0, 3).join('、') || '一些核心优势'}，可能的职业方向包括${roleText}。你想先了解哪个职业方向？`;
 }
 
 function buildInitialBoardSummary(report: CareerReport | null, preview: PathMapPreview | null): PathBoardSummary {
@@ -137,11 +144,11 @@ function buildInitialBoardSummary(report: CareerReport | null, preview: PathMapP
   const roleText = topRoles[0] || primaryCluster?.name || '一个最容易验证的职业方向';
 
   return {
-    leastResistancePath: roleText,
+    leastResistancePath: primaryCluster?.name || roleText,
     reason: resources.length
-      ? `它更容易承接你现在已经显露出的${resources.slice(0, 3).join('、')}，适合先做低成本现实验证。`
-      : '它更适合作为第一条现实验证路径，而不是直接做长期承诺。',
-    nextStep: topRoles[0] ? `围绕“${topRoles[0]}”找 3 条真实岗位描述，观察日常任务和能力要求。` : '先选 1 个方向，找 3 个真实样本做观察。',
+      ? `这个方向能承接你已经显露出的${resources.slice(0, 3).join('、')}，可以先从其中一个具体岗位继续了解。`
+      : '这是当前更值得先了解的方向之一，后续会结合真实经历和岗位信息继续调整。',
+    nextStep: '先和教练一起看见一条你愿意继续了解的可能性，再由你选择最顺手的探索入口。',
     resources,
     resourceNotes: [],
     tools: ['招聘信息', '信息面谈', '作品/经历盘点'],
@@ -167,7 +174,7 @@ function buildBoardSummaryFromConversation(report: CareerReport | null, preview:
     ...base,
     leastResistancePath: mentionedRole,
     reason: `从刚才的对话看，你对“${mentionedRole}”已经有更明确的注意力。它适合先放进资源板里耐心观察：哪些任务真的吸引你，哪些要求会消耗你，哪些已有能力可以自然迁移。`,
-    nextStep: `先只观察“${mentionedRole}”的一条真实岗位或案例，圈出里面最反复出现的 3 个任务词，不急着投递或做决定。`,
+    nextStep: `你可以从“${mentionedRole}”的岗位日常、真实职位描述、相邻岗位或从业者经验里，选一个最想先了解的角度。`,
     resources: pickTopItems([...base.resources, ...resourceNotes.map((note) => note.text)], 8),
     resourceNotes,
     updatedAt: now.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }),
@@ -363,7 +370,7 @@ function insertSemanticBreaks(input: string) {
     .replace(/(?:这类岗位的日常核心是|岗位日常核心是|这类岗位的真实工作日常包括|岗位的真实工作日常包括|真实工作日常包括|这个岗位常见的工作内容有|它日常会做|真实工作日常)：?/g, '真实工作日常：')
     .replace(/(?:待验证的是|仍需验证|需要验证的是)：?/g, '还需要验证：')
     .replace(/比如\s*(?!：)/g, '比如：')
-    .replace(/([：；，、])，+/g, '$1')
+    .replace(/([：；，])，+/g, '$1')
     .replace(/([：；])\s*，/g, '$1')
     .replace(/，{2,}/g, '，')
     .replace(/(典型一天可能包括|一天可能包括|日常任务可能包括|日常通常包括)：?\s*(?=(上午|中午|下午|晚上|下班前|会前|会中|会后|第一步|第二步|第三步))/g, '$1：\n• ')
@@ -664,6 +671,160 @@ function PathModule({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function WorkProfileBoard({ profile, hasConversation }: { profile: PathMapPreview['work_profile']; hasConversation: boolean }) {
+  const dimensions = [
+    { label: '喜欢解决什么问题', value: profile.preferred_problems, icon: Search },
+    { label: '倾向如何工作', value: profile.work_style, icon: BriefcaseBusiness },
+    { label: '为谁创造什么价值', value: profile.value_for, icon: Users },
+  ];
+
+  return (
+    <section className="rounded-[1.6rem] border border-[#86B8FF]/18 bg-white/78 p-5 shadow-[0_18px_50px_rgba(15,23,42,0.05)] backdrop-blur md:p-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 text-sm font-semibold text-[#2A6FA3]">
+            <Target className="h-4 w-4 text-sky-500" />
+            你的职业特征
+          </div>
+          <p className="mt-2 text-sm leading-6 text-slate-500">
+            {hasConversation ? '这是结合天赋报告与现实路径对话持续整理的工作画像。' : '这是根据天赋报告和已有对话生成的初步画像，后续会继续校准。'}
+          </p>
+          <span className="mt-3 inline-flex rounded-full bg-[#F3F8FF] px-3 py-1 text-xs font-semibold text-[#2A6FA3]">
+            {hasConversation ? '已加入现实对话线索' : '初始判断 · 来自天赋报告'}
+          </span>
+        </div>
+      </div>
+      <div className="mt-4 grid gap-3 lg:grid-cols-3">
+        {dimensions.map((dimension) => (
+          <div key={dimension.label} className="rounded-2xl border border-[#86B8FF]/14 bg-[#F3F8FF]/55 p-4">
+            <div className="flex items-center gap-2 text-xs font-semibold text-[#2A6FA3]">
+              <dimension.icon className="h-4 w-4 text-sky-500" />
+              {dimension.label}
+            </div>
+            <p className="mt-2 text-sm leading-6 text-slate-700">{dimension.value}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+type DemoEvidenceMode = 'idle' | 'supplement' | 'submittedSupplement';
+
+function CapabilityEvidenceProgressDemo({ confirmed, mode }: { confirmed: boolean; mode: DemoEvidenceMode }) {
+  const statusLabel = confirmed
+    ? '已确认'
+    : mode === 'supplement' || mode === 'submittedSupplement'
+      ? '待补充'
+      : '待你确认';
+  return (
+    <section className="rounded-[1.6rem] border border-[#86B8FF]/22 bg-white/82 p-5 shadow-[0_18px_50px_rgba(134,184,255,0.12)] backdrop-blur md:p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2 text-sm font-semibold text-[#2A6FA3]">
+            <ClipboardCheck className="h-4 w-4 text-sky-500" />
+            示范：能力迁移进度
+          </div>
+          <p className="mt-2 text-sm leading-6 text-slate-500">看一条能力证据如何从待确认变成已确认。实际核对数量会根据岗位动态确定，通常是 3–5 项。</p>
+        </div>
+        <span className="rounded-full bg-[#F3F8FF] px-3 py-1 text-xs font-semibold text-[#2A6FA3]">
+          产品经理 · {confirmed ? '已确认 1 项' : '当前核对第 1 项'}
+        </span>
+      </div>
+      <div className="mt-4 rounded-2xl border border-[#86B8FF]/20 bg-[#F3F8FF]/60 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-sm font-semibold text-[#2A6FA3]">识别问题与需求归因</div>
+          <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${confirmed ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+            {statusLabel}
+          </span>
+        </div>
+        <div className="mt-3 grid gap-2 text-sm leading-6 text-slate-700">
+          <div><span className="font-semibold text-slate-500">你的经历：</span>整理用户反馈并提出改进方案。</div>
+          <div><span className="font-semibold text-slate-500">可复用能力：</span>识别真实问题、归因核心卡点。</div>
+          <div><span className="font-semibold text-slate-500">岗位动作：</span>把模糊诉求转成可执行需求。</div>
+        </div>
+      </div>
+      <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
+        <span className={`h-2 w-2 rounded-full ${confirmed ? 'bg-emerald-400' : 'bg-amber-300'}`} />
+        {confirmed ? '确认后才进入下一项能力核对。' : mode === 'idle' ? '右侧对话确认后，这条才会变成已证实。' : '教练会根据你的补充重新整理这条线索。'}
+      </div>
+    </section>
+  );
+}
+
+function CapabilityEvidenceCoachDemo({
+  confirmed,
+  mode,
+  draft,
+  onDraftChange,
+  onConfirm,
+  onChooseSupplement,
+  onSubmitFeedback,
+  onReset,
+}: {
+  confirmed: boolean;
+  mode: DemoEvidenceMode;
+  draft: string;
+  onDraftChange: (value: string) => void;
+  onConfirm: () => void;
+  onChooseSupplement: () => void;
+  onSubmitFeedback: () => void;
+  onReset: () => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-[#B9D8F2]/70 bg-[#F2F8FF] px-4 py-4 text-sm leading-7 text-slate-700 shadow-sm">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <span className="text-xs font-semibold uppercase tracking-[0.16em] text-[#2A6FA3]">能力证据确认示范</span>
+      </div>
+      <p>你刚才提到，自己经常整理用户反馈、判断问题原因，还会把模糊诉求整理成具体改进方案。</p>
+      <p className="mt-3">我先这样理解：这段经历已经体现出你在<strong className="font-semibold text-[#2A6FA3]">识别真实问题、归因核心卡点、把模糊诉求转成可执行需求</strong>。放到产品经理岗位里，对应的是需求分析和问题定义。</p>
+      <p className="mt-3 font-semibold text-[#2A6FA3]">这条理解准确吗？</p>
+      {confirmed ? (
+        <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-xs text-emerald-700">
+          <span className="flex items-center gap-1.5"><CheckCircle2 className="h-4 w-4" />已确认，进入下一项能力</span>
+          <button type="button" className="font-semibold underline underline-offset-2" onClick={onReset}>重新看示范</button>
+        </div>
+      ) : mode === 'submittedSupplement' ? (
+        <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50/80 p-3 text-sm leading-6 text-sky-900">
+          <div className="text-xs font-semibold text-sky-700">根据你的补充，我重新整理了一版：</div>
+          <p className="mt-2 rounded-lg bg-white/75 px-3 py-2 text-slate-700">“{draft}”</p>
+          <p className="mt-2">这说明你不只是整理信息，还参与了方案推进和结果验证。放到产品经理岗位里，对应的是从问题识别到方案落地的完整推进。</p>
+          <p className="mt-2 font-semibold text-[#2A6FA3]">这版理解更接近你的实际经历吗？</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button size="sm" className="rounded-full bg-[#86B8FF]/85 text-[#225F91] shadow-sm hover:bg-[#78AAEE]" onClick={onConfirm}>确认这版</Button>
+            <Button size="sm" variant="outline" className="rounded-full border-[#B9D8F2] bg-white/80 text-[#47708F]" onClick={onChooseSupplement}>继续补充</Button>
+            <Button size="sm" variant="ghost" className="rounded-full text-slate-500 hover:bg-white/70" onClick={onReset}>重新看示范</Button>
+          </div>
+        </div>
+      ) : mode === 'supplement' ? (
+        <div className="mt-3 rounded-xl border border-[#B9D8F2]/80 bg-white/80 p-3">
+          <div className="text-xs font-semibold text-[#47708F]">
+            补充这段经历里你亲自做了什么，或产生了什么结果。
+          </div>
+          <textarea
+            value={draft}
+            onChange={(event) => onDraftChange(event.target.value)}
+            rows={2}
+            placeholder="例如：我还负责推动设计和研发一起上线，并跟踪了反馈变化。"
+            className="mt-2 w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm leading-6 text-slate-700 outline-none placeholder:text-slate-400 focus:border-[#86B8FF] focus:ring-2 focus:ring-[#86B8FF]/20"
+          />
+          <div className="mt-2 flex gap-2">
+            <Button size="sm" className="rounded-full bg-[#86B8FF]/85 text-[#225F91] shadow-sm hover:bg-[#78AAEE]" disabled={!draft.trim()} onClick={onSubmitFeedback}>
+              提交补充
+            </Button>
+            <Button size="sm" variant="ghost" className="rounded-full text-slate-500 hover:bg-slate-100" onClick={onReset}>返回确认</Button>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button size="sm" className="rounded-full bg-[#86B8FF]/85 text-[#225F91] shadow-sm hover:bg-[#78AAEE]" onClick={onConfirm}>这条准确</Button>
+          <Button size="sm" variant="outline" className="rounded-full border-[#B9D8F2] bg-white/80 text-[#47708F]" onClick={onChooseSupplement}>我想补充</Button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -968,10 +1129,10 @@ function CareerExplorationBoard({
           <div>
             <div className="flex items-center gap-2 text-sm font-semibold text-[#2A6FA3]">
               <BriefcaseBusiness className="h-4 w-4 text-sky-500" />
-              职业探索 Check 板
+              我已经了解了什么
             </div>
             <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-600">
-              围绕一个岗位慢慢补齐现实证据。教练后续可以根据这里看到：你已经了解了什么，还缺哪一步。
+              这些是可以帮助你看清岗位的探索角度，不是必须完成的清单。你可以只勾选已经看过、聊过或确认过的部分。
             </p>
           </div>
           <Button
@@ -990,7 +1151,7 @@ function CareerExplorationBoard({
           <div className="mx-auto max-w-3xl">
             <div className="rounded-xl border border-[#86B8FF]/18 bg-[#F3F8FF]/55 px-3 py-2.5">
               <div className="flex items-center justify-between gap-3 text-sm">
-                <span className="font-semibold text-[#2A6FA3]">行动 check</span>
+                <span className="font-semibold text-[#2A6FA3]">了解进度</span>
                 <span className="font-bold text-[#2A6FA3]">{checks.length}/{CAREER_EXPLORATION_STEPS.length}</span>
               </div>
               <div className="mt-2 h-2 overflow-hidden rounded-full bg-white">
@@ -1040,6 +1201,7 @@ function MobilePanel({
   description,
   expanded,
   onToggle,
+  collapsedOnDesktop = false,
   children,
 }: {
   id: PanelId;
@@ -1047,6 +1209,7 @@ function MobilePanel({
   description: string;
   expanded: boolean;
   onToggle: (id: PanelId) => void;
+  collapsedOnDesktop?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -1062,7 +1225,7 @@ function MobilePanel({
         </span>
         <ChevronDown className={`h-5 w-5 text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
       </button>
-      <div className={expanded ? 'block' : 'hidden min-[560px]:block'}>{children}</div>
+      <div className={expanded ? 'block' : collapsedOnDesktop ? 'hidden' : 'hidden min-[560px]:block'}>{children}</div>
     </section>
   );
 }
@@ -1118,7 +1281,7 @@ function TaskListCard({
             </label>
           )) : (
             <div className="rounded-2xl border border-dashed border-[#86B8FF]/25 bg-[#F3F8FF]/55 px-4 py-5 text-sm leading-7 text-slate-500">
-              这里会出现你确认过的一个小行动。不是催促，是帮你把“可以试试”轻轻放到今天。
+              和教练确认的下一步，会记录在这里。
             </div>
           )}
         </div>
@@ -1454,20 +1617,20 @@ function FormattedCoachText({ content }: { content: string }) {
   if (blocks.length === 0) return null;
 
   return (
-    <div className="space-y-2.5 text-sm leading-6 text-inherit">
+    <div className="space-y-3.5 text-sm leading-7 text-inherit">
       {blocks.map((block, index) => {
         if (block.kind === 'list') {
           return (
-            <div key={`${block.intro}-${index}`} className="space-y-1.5">
+            <div key={`${block.intro}-${index}`} className="space-y-2">
               {block.intro ? (
                 <p className="break-words leading-6">
                   <HighlightedInlineText text={block.intro} />
                 </p>
               ) : null}
-              <ul className="space-y-1">
+              <ul className="space-y-2">
                 {block.items.map((item, itemIndex) => (
-                  <li key={`${item}-${itemIndex}`} className="grid grid-cols-[16px_minmax(0,1fr)] items-start gap-2 leading-6 text-inherit">
-                    <span className="pt-[0.39rem] text-center text-[16px] font-bold leading-none text-[#2A6FA3]">•</span>
+                  <li key={`${item}-${itemIndex}`} className="grid grid-cols-[18px_minmax(0,1fr)] items-start gap-2 leading-7 text-inherit">
+                    <span className="pt-[0.08rem] text-center text-[20px] font-semibold leading-7 text-[#8ABBE5]">•</span>
                     <span className="min-w-0 break-words [overflow-wrap:anywhere]">
                       <HighlightedInlineText text={item} />
                     </span>
@@ -1556,6 +1719,12 @@ function cleanCoachText(content: string) {
     .replace(/(^|\n)\s*[-*+]\s+/g, '$1• ')
     .replace(/(^|\n)\s*\d+[.)]\s+/g, '$1• ')
     .replace(/'([^'\n]{1,60})'/g, '“$1”')
+    .replace(/“([^”\n]{2,40})”/g, '@@HL_OPEN@@“$1”@@HL_CLOSE@@')
+    .replace(/(?:NPS|DAU|MAU|转化率|完成率|解决率)\s*[+＋-]?\s*\d+(?:\.\d+)?%?/gi, '@@HL_OPEN@@$&@@HL_CLOSE@@')
+    // 行内的短横线、圆点只是模型生成的分隔符，不应渲染成伪列表。
+    // 只处理水平空格包围的分隔符，保留真正换行后的圆点列表。
+    .replace(/[ \t]+[-•·][ \t]+/g, '，')
+    .replace(/(?:真实工作日常|核心工作|工作内容|岗位职责)：\s*这些事[：:]?/g, (match) => match.replace('这些事', '').replace('：：', '：'))
     .trim();
   return insertSemanticBreaks(cleaned);
 }
@@ -1566,9 +1735,12 @@ function HighlightedInlineText({ text }: { text: string }) {
     <>
       {parts.map((part, index) => {
         if (part.kind === 'highlight') {
+          const { leading, core, trailing } = splitHighlightPunctuation(part.text);
           return (
-            <span key={`${part.text}-${index}`} className="rounded-md bg-[#86B8FF]/14 px-1.5 py-0.5 font-semibold text-[#2A6FA3]">
-              {part.text}
+            <span key={`${part.text}-${index}`}>
+              {leading}
+              <span className="rounded-md bg-[#86B8FF]/14 px-0.5 py-px font-semibold text-[#2A6FA3]">{core}</span>
+              {trailing}
             </span>
           );
         }
@@ -1658,15 +1830,18 @@ function splitBulletBlockByTrailingText(block: { intro: string; items: string[] 
 
 function splitTrailingSemanticShift(text: string) {
   const trimmed = text.trim();
-  const startsAsFollowUp = /^(接下来[，,]?你想|你想|你最想|你对这个岗位|你为什么对|看1条真实|或直接|或者[，,]?你|可以只说|我来帮你)/.test(trimmed);
-  if (startsAsFollowUp) return { before: '', after: trimmed };
+  const sentences = trimmed.match(/[^。！？；]+[。！？；]?/g)?.map((item) => item.trim()).filter(Boolean) || [];
+  if (sentences.length < 2) return { before: trimmed, after: '' };
 
-  const match = trimmed.match(/^([\s\S]*?[。！？；])\s*((?:这些都可能是|这类素材|它不需要|接下来[，,]?你想|你想|你最想|你对这个岗位|你为什么对|看1条真实|或直接|或者[，,]?你|可以只说|我来帮你)[\s\S]*)$/);
-  if (!match) return { before: trimmed, after: '' };
+  // 列表项可能同时包含“岗位工作内容”和“用户能力映射/追问”。
+  // 按语义角色寻找切换点，而不是为某一句具体文案添加例外。
+  const semanticShiftStart = /^(?:你(?:提到|刚才(?:提到|说)|做过|已经|在经历中)|从你(?:刚才|的经历|的描述)|这(?:说明|意味着|项经历|条经历|些经验)|放到(?:这个|目标)岗位|在(?:这个|目标)岗位(?:里|中)|对应(?:到|的是)?目标岗位|因此|所以|接下来|下一步|如果你|你想|你最想|你对这个岗位|你为什么对|看一条真实|或者|或直接|可以只说|我来帮你)/;
+  const shiftIndex = sentences.findIndex((sentence, index) => index > 0 && semanticShiftStart.test(sentence));
+  if (shiftIndex === -1) return { before: trimmed, after: '' };
 
   return {
-    before: match[1].trim(),
-    after: match[2].trim(),
+    before: sentences.slice(0, shiftIndex).join('').trim(),
+    after: sentences.slice(shiftIndex).join('').trim(),
   };
 }
 
@@ -1688,7 +1863,7 @@ function isSemanticListIntro(text: string) {
 function normalizeQuestionOptions(text: string) {
   if (!isFollowUpQuestion(text)) return text;
   return text
-    .replace(/\s*[•●▪◦▸]\s*/g, '，')
+    .replace(/[ \t]*[-•●▪◦▸·][ \t]*/g, '，')
     .replace(/比如：，/g, '比如：')
     .replace(/，([，。！？；：])/g, '$1');
 }
@@ -1710,9 +1885,7 @@ function segmentCoachText(text: string): CoachSegment[] {
     ) {
       segments.push({
         text: part
-          .replace(/^@@HL_OPEN@@|@@HL_CLOSE@@$/g, '')
-          .replace(/^“|”$/g, '')
-          .replace(/^「|」$/g, ''),
+          .replace(/^@@HL_OPEN@@|@@HL_CLOSE@@$/g, ''),
         kind: 'highlight',
       });
       continue;
@@ -1729,6 +1902,13 @@ function segmentCoachText(text: string): CoachSegment[] {
   }
 
   return segments.filter((segment) => segment.text.trim().length > 0 || segment.kind === 'slash');
+}
+
+function splitHighlightPunctuation(text: string) {
+  // 高亮只包住语义核心，所有中文标点（包括并列顿号）原样留在外围。
+  const match = text.match(/^([\s，。；：、！？…（）《》“”‘’「」,.!?;:()[\]{}]*)([\s\S]*?)([\s，。；：、！？…（）《》“”‘’「」,.!?;:()[\]{}]*)$/);
+  if (!match || !match[2]) return { leading: '', core: text, trailing: '' };
+  return { leading: match[1], core: match[2], trailing: match[3] };
 }
 
 export default function PathPage() {
@@ -1752,13 +1932,17 @@ export default function PathPage() {
   const [selectedCalendarDate, setSelectedCalendarDate] = useState(() => toDateKey(new Date()));
   const [boardSummary, setBoardSummary] = useState<PathBoardSummary | null>(null);
   const [pendingBoardSummary, setPendingBoardSummary] = useState<PathBoardSummary | null>(null);
+  const [demoEvidenceConfirmed, setDemoEvidenceConfirmed] = useState(false);
+  const [demoEvidenceMode, setDemoEvidenceMode] = useState<DemoEvidenceMode>('idle');
+  const [demoEvidenceDraft, setDemoEvidenceDraft] = useState('');
   const [archiveUpdatedAt, setArchiveUpdatedAt] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [selectedExplorationRole, setSelectedExplorationRole] = useState('');
   const [explorationChecksByRole, setExplorationChecksByRole] = useState<Record<string, CareerExplorationCheckId[]>>({});
+  const [visiblePanels, setVisiblePanels] = useState<PanelId[]>(DEFAULT_VISIBLE_PANELS);
   const [expandedPanels, setExpandedPanels] = useState<Record<PanelId, boolean>>({
-    overview: false,
-    tasks: false,
+    overview: true,
+    tasks: true,
     reflection: false,
     calendar: false,
     modules: false,
@@ -1770,6 +1954,13 @@ export default function PathPage() {
 
   useEffect(() => {
     const load = async () => {
+      try {
+        const savedVisiblePanels = JSON.parse(window.localStorage.getItem(PATH_VISIBLE_PANELS_KEY) || '[]') as PanelId[];
+        const validVisiblePanels = savedVisiblePanels.filter((panelId) => ALL_PANEL_IDS.includes(panelId));
+        if (validVisiblePanels.length) setVisiblePanels(validVisiblePanels);
+      } catch {
+        setVisiblePanels(DEFAULT_VISIBLE_PANELS);
+      }
       const savedReport = window.localStorage.getItem(REPORT_STORAGE_KEY);
       const parsedReport = savedReport ? (JSON.parse(savedReport) as CareerReport) : null;
       const activeSample = readActiveCareerSample()?.report || null;
@@ -1794,6 +1985,7 @@ export default function PathPage() {
 
       setLocked(false);
       setReport(resolved);
+      void trackEvent({ eventName: 'path_opened', page: '/path', status: 'success', metadata: { hasReport: true } });
       setTasks(readPathTasks());
       setExplorationChecksByRole(readCareerExplorationChecks());
       setConversationArchives(readConversationArchives());
@@ -1805,7 +1997,14 @@ export default function PathPage() {
         setReflectionMood(todayReflection.mood);
         setReflectionSavedAt(new Date(todayReflection.updatedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
       }
-      const nextPreview = buildPathMapPreview(resolved);
+      let pathSourceMessages: StoredCareerSampleMessage[] = [];
+      try {
+        const savedMessages = JSON.parse(window.localStorage.getItem(CHAT_STORAGE_KEY) || '[]');
+        if (Array.isArray(savedMessages)) pathSourceMessages = savedMessages;
+      } catch {
+        pathSourceMessages = [];
+      }
+      const nextPreview = buildPathMapPreview(resolved, pathSourceMessages);
       const savedBoard = window.localStorage.getItem(PATH_BOARD_SUMMARY_KEY);
       const initialBoard = buildInitialBoardSummary(resolved, nextPreview);
       setPreview(nextPreview);
@@ -1849,6 +2048,16 @@ export default function PathPage() {
   const currentExplorationRole = selectedExplorationRole || topRoles[0] || boardSummary?.leastResistancePath || '待探索岗位';
   const currentExplorationChecks = explorationChecksByRole[currentExplorationRole] || [];
   const canSuggestBoardUpdate = hasEnoughEvidenceForPathUpdate(messages, currentExplorationChecks);
+  const panelModules: Array<{ id: PanelId; label: string; description: string; icon: React.ComponentType<{ className?: string }> }> = [
+    { id: 'overview', label: '路径总览', description: '当前方向与下一步', icon: Compass },
+    { id: 'tasks', label: '任务列表', description: '已确认的行动安排', icon: ClipboardCheck },
+    { id: 'reflection', label: '今日觉察', description: '记录感受与发现', icon: Heart },
+    { id: 'calendar', label: '行动日历', description: '回看行动与记录', icon: CalendarDays },
+    { id: 'modules', label: '资源与资料', description: '整理能力、经验和资源', icon: LayoutGrid },
+    { id: 'exploration', label: '探索入口', description: '选择想了解的现实角度', icon: BriefcaseBusiness },
+    { id: 'profile', label: '资料概览', description: '查看当前主线资料', icon: Target },
+    { id: 'updates', label: '资料更新', description: '确认新的整理结果', icon: FilePenLine },
+  ];
 
   useEffect(() => {
     if (!selectedExplorationRole && topRoles[0]) {
@@ -1860,6 +2069,25 @@ export default function PathPage() {
     setExpandedPanels((current) => ({ ...current, [id]: !current[id] }));
   };
 
+  const setPanelVisibility = (panelId: PanelId, visible: boolean) => {
+    setVisiblePanels((current) => {
+      const next = visible
+        ? Array.from(new Set([...current, panelId]))
+        : current.filter((item) => item !== panelId);
+      window.localStorage.setItem(PATH_VISIBLE_PANELS_KEY, JSON.stringify(next));
+      return next;
+    });
+    if (visible) {
+      setExpandedPanels((current) => ({ ...current, [panelId]: true }));
+    }
+  };
+
+  const restoreRecommendedPanels = () => {
+    setVisiblePanels(DEFAULT_VISIBLE_PANELS);
+    window.localStorage.setItem(PATH_VISIBLE_PANELS_KEY, JSON.stringify(DEFAULT_VISIBLE_PANELS));
+    setExpandedPanels((current) => ({ ...current, overview: true, tasks: true, reflection: true }));
+  };
+
   const toggleCareerExplorationCheck = (id: CareerExplorationCheckId) => {
     const role = currentExplorationRole;
     const currentChecks = explorationChecksByRole[role] || [];
@@ -1869,6 +2097,12 @@ export default function PathPage() {
     const next = { ...explorationChecksByRole, [role]: nextChecks };
     setExplorationChecksByRole(next);
     saveCareerExplorationChecks(next);
+    void trackEvent({ eventName: 'capability_confirmed', page: '/path', status: nextChecks.includes(id) ? 'confirmed' : 'unconfirmed', metadata: { roleName: role, capability: id } });
+  };
+
+  const handleSelectExplorationRole = (role: string) => {
+    setSelectedExplorationRole(role);
+    void trackEvent({ eventName: 'role_selected', page: '/path', status: 'success', metadata: { roleName: role } });
   };
 
   const closeMenuAndGo = (href: string) => {
@@ -1876,6 +2110,7 @@ export default function PathPage() {
     if (href.startsWith('#')) {
       const panelId = href.slice(1) as PanelId | 'coach';
       if (panelId === 'overview' || panelId === 'tasks' || panelId === 'reflection' || panelId === 'calendar' || panelId === 'modules' || panelId === 'exploration' || panelId === 'profile' || panelId === 'updates') {
+        setPanelVisibility(panelId, true);
         setExpandedPanels((current) => ({ ...current, [panelId]: true }));
       }
       window.setTimeout(() => {
@@ -1897,21 +2132,25 @@ export default function PathPage() {
     }
     const inferredResourceNotes = inferResourceNotesFromUserText(text, currentExplorationRole);
     if (inferredResourceNotes.length) {
-      setBoardSummary((current) => {
-        const base = current || buildInitialBoardSummary(report, preview);
-        const nextBoard = {
+      setPendingBoardSummary((current) => {
+        const base = current || boardSummary || buildInitialBoardSummary(report, preview);
+        return {
           ...base,
           resources: pickTopItems([...base.resources, ...inferredResourceNotes.map((note) => note.text)], 8),
           resourceNotes: mergeResourceNotes(base.resourceNotes || [], inferredResourceNotes),
           updatedAt: new Date().toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }),
-          source: '根据现实路径教练对话自动记录的资源线索',
+          source: '待你确认的现实路径对话线索',
         };
-        persistPathBoardSummary(nextBoard);
-        return nextBoard;
       });
       setExpandedPanels((current) => ({ ...current, modules: true }));
     }
     const nextMessages = [...messages, { role: 'user' as const, content: text }];
+    void trackEvent({
+      eventName: 'path_chat_message_sent',
+      page: '/path',
+      status: 'success',
+      metadata: { turnNumber: messages.filter((message) => message.role === 'user').length + 1, roleName: currentExplorationRole || null },
+    });
     setMessages(nextMessages);
     setDraft('');
     setIsCoachTyping(true);
@@ -1925,11 +2164,18 @@ export default function PathPage() {
       const data = (await res.json()) as { reply?: string };
       const assistantMessages = splitAssistantReply(data.reply || '现实路径教练暂时没有返回内容，请稍后再试。');
       setMessages((prev) => [...prev, ...assistantMessages]);
+      void trackEvent({ eventName: 'path_chat_reply_received', page: '/path', status: 'success', metadata: { roleName: currentExplorationRole || null } });
       const checksForRole = explorationChecksByRole[currentExplorationRole] || [];
       if (hasEnoughEvidenceForPathUpdate(nextMessages, checksForRole)) {
-        setPendingBoardSummary(buildBoardSummaryFromConversation(report, preview, nextMessages));
+        const nextSummary = buildBoardSummaryFromConversation(report, preview, nextMessages);
+        setPendingBoardSummary((current) => current ? {
+          ...nextSummary,
+          resources: pickTopItems([...nextSummary.resources, ...current.resources], 8),
+          resourceNotes: mergeResourceNotes(nextSummary.resourceNotes || [], current.resourceNotes || []),
+        } : nextSummary);
       }
     } catch {
+      void trackEvent({ eventName: 'path_chat_reply_received', page: '/path', status: 'error' });
       setMessages((prev) => [...prev, { role: 'assistant', content: '现实路径教练暂时没有返回内容，请稍后再试。' }]);
     } finally {
       setIsCoachTyping(false);
@@ -1960,6 +2206,16 @@ export default function PathPage() {
         content: buildCoachIntro(report, preview),
       },
     ]);
+  };
+
+  const confirmBoardUpdate = (nextBoard: PathBoardSummary) => {
+    const confirmedBoard = {
+      ...nextBoard,
+      source: nextBoard.source === '待你确认的现实路径对话线索' ? '经你确认的现实路径对话线索' : nextBoard.source,
+    };
+    setBoardSummary(confirmedBoard);
+    persistPathBoardSummary(confirmedBoard);
+    setPendingBoardSummary(null);
   };
 
   const updateArchive = async () => {
@@ -2005,6 +2261,8 @@ export default function PathPage() {
         completedAt: task.completedAt ? null : new Date().toISOString(),
       };
     });
+    const toggledTask = tasks.find((task) => task.id === taskId);
+    void trackEvent({ eventName: toggledTask?.completedAt ? 'action_reopened' : 'action_completed', page: '/path', status: 'success', metadata: { taskId, taskTitle: toggledTask?.title || '' } });
     setTasks(nextTasks);
     savePathTasks(nextTasks);
   };
@@ -2054,13 +2312,9 @@ export default function PathPage() {
         <div className="mt-6 grid gap-6 min-[768px]:grid-cols-[minmax(0,1fr)_340px] xl:grid-cols-[minmax(0,1fr)_400px]">
           <div className="order-2 min-w-0 space-y-6 min-[768px]:order-1">
             <div className="hidden rounded-[1.6rem] border border-[#86B8FF]/16 bg-white/72 p-6 shadow-[0_18px_50px_rgba(15,23,42,0.06)] backdrop-blur md:block">
-              <div className="inline-flex items-center gap-2 rounded-full border border-[#86B8FF]/35 bg-[#86B8FF]/18 px-3 py-1 text-xs font-semibold text-[#2A6FA3]">
-                <Compass className="h-3.5 w-3.5" />
-                现实路径地图
-              </div>
-              <h1 className="mt-4 text-3xl font-bold tracking-tight text-[#2A6FA3]">把报告里的方向变成可推进的职业路径</h1>
+              <h1 className="text-3xl font-bold tracking-tight text-[#2A6FA3]">把报告里的方向变成可推进的职业路径</h1>
               <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
-                在这里整理你感兴趣的岗位、已有经验和可用资源。右侧教练会和你逐项核对岗位需求、现实条件与下一步，帮你找到更适合优先推进的方向。
+                先跟现实路径教练聊聊你的想法，然后在面板里进行下一步整理、分析和记录。
               </p>
             </div>
 
@@ -2083,10 +2337,19 @@ export default function PathPage() {
               </Card>
             ) : null}
 
-            <MobilePanel
+            {!locked && preview?.work_profile ? (
+              <WorkProfileBoard
+                profile={preview.work_profile}
+                hasConversation={messages.some((message) => message.role === 'user' && message.content.trim().length > 0)}
+              />
+            ) : null}
+
+            {!locked ? <CapabilityEvidenceProgressDemo confirmed={demoEvidenceConfirmed} mode={demoEvidenceMode} /> : null}
+
+            {visiblePanels.includes('overview') ? <MobilePanel
               id="overview"
-              title="最小阻力路径"
-              description="综合资源、工具、路径和场域后的总判断。"
+              title="当前探索焦点"
+              description="这一轮正在核对什么，以及它如何推进下一步。"
               expanded={expandedPanels.overview}
               onToggle={togglePanel}
             >
@@ -2094,7 +2357,7 @@ export default function PathPage() {
                 <CardContent className="p-6">
                   <div className="flex items-center gap-2 text-sm font-semibold text-[#2A6FA3]">
                     <Compass className="h-4 w-4" />
-                    最小阻力路径
+                    当前探索焦点
                   </div>
                   <h2 className="mt-3 text-2xl font-bold tracking-tight text-[#2A6FA3]">
                     {locked ? '完成天赋报告后生成' : boardSummary?.leastResistancePath || '正在整理'}
@@ -2102,27 +2365,26 @@ export default function PathPage() {
                   <p className="mt-3 text-sm leading-7 text-[#4A789C]">
                     {locked
                       ? '这里会综合你的资源、工具、路径和可进入场域，判断哪条职业路径最适合先推进。'
-                      : boardSummary?.reason}
+                      : '先看清这个方向里的工作，哪些与你做过的事情相连。'}
                   </p>
                   {!locked ? (
                     <div className="mt-5 rounded-2xl border border-[#86B8FF]/20 bg-white/72 px-4 py-3">
-                      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#7A97B5]">下一步</div>
-                      <div className="mt-2 text-sm leading-7 text-[#2A6FA3]">{boardSummary?.nextStep}</div>
+                      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#7A97B5]">正在核对</div>
+                      <div className="mt-2 text-sm leading-7 text-[#2A6FA3]">
+                        用户反馈整理与问题归因，对应需求分析能力
+                      </div>
+                      <div className="mt-2 text-xs text-[#7A97B5]">
+                        {demoEvidenceConfirmed ? '已确认，继续下一项。' : '等待确认或补充。'}
+                      </div>
                     </div>
                   ) : null}
-                  {boardSummary?.updatedAt ? (
-                    <p className="mt-3 text-xs text-slate-400">
-                      {boardSummary.source} · {boardSummary.updatedAt}
-                    </p>
-                  ) : (
-                    <p className="mt-3 text-xs text-slate-400">{boardSummary?.source || '等待基础资料'}</p>
-                  )}
                 </CardContent>
               </Card>
-            </MobilePanel>
+            </MobilePanel> : null}
 
-            <div className="grid gap-4 min-[1080px]:grid-cols-2">
-              <MobilePanel
+            {visiblePanels.includes('tasks') || visiblePanels.includes('reflection') ? (
+            <div className={`grid gap-4 ${visiblePanels.includes('tasks') && visiblePanels.includes('reflection') ? 'min-[1080px]:grid-cols-2' : ''}`}>
+              {visiblePanels.includes('tasks') ? <MobilePanel
                 id="tasks"
                 title="任务列表"
                 description="教练确认后的微行动会同步到这里。"
@@ -2130,9 +2392,9 @@ export default function PathPage() {
                 onToggle={togglePanel}
               >
                 <TaskListCard tasks={tasks} locked={locked} onToggleTask={toggleTaskCompletion} />
-              </MobilePanel>
+              </MobilePanel> : null}
 
-              <MobilePanel
+              {visiblePanels.includes('reflection') ? <MobilePanel
                 id="reflection"
                 title="今日觉察"
                 description="记录对话、行动和心情贴纸。"
@@ -2148,15 +2410,17 @@ export default function PathPage() {
                   onMoodChange={setReflectionMood}
                   onSave={saveTodayReflection}
                 />
-              </MobilePanel>
+              </MobilePanel> : null}
             </div>
+            ) : null}
 
-            <MobilePanel
+            {visiblePanels.includes('calendar') ? <MobilePanel
               id="calendar"
               title="行动力日历"
               description="用图标回看任务、觉察和心情。"
               expanded={expandedPanels.calendar}
               onToggle={togglePanel}
+              collapsedOnDesktop
             >
               <PathActionCalendar
                 tasks={tasks}
@@ -2166,14 +2430,15 @@ export default function PathPage() {
                 onSelectDate={setSelectedCalendarDate}
                 onOpenArchive={setOpenArchive}
               />
-            </MobilePanel>
+            </MobilePanel> : null}
 
-            <MobilePanel
+            {visiblePanels.includes('modules') ? <MobilePanel
               id="modules"
               title="资料模块"
               description="愿景板和按岗位整理的资源支持。"
               expanded={expandedPanels.modules}
               onToggle={togglePanel}
+              collapsedOnDesktop
             >
               <div className="grid gap-4 min-[1500px]:grid-cols-[minmax(280px,0.85fr)_minmax(560px,1.15fr)]">
                 <PathModule
@@ -2193,33 +2458,36 @@ export default function PathPage() {
                   checksByRole={explorationChecksByRole}
                 />
               </div>
-            </MobilePanel>
+            </MobilePanel> : null}
 
-            <MobilePanel
+            {visiblePanels.includes('exploration') ? <MobilePanel
               id="exploration"
-              title="职业探索"
-              description="围绕一个岗位记录已完成的现实调查。"
+              title="探索入口"
+              description="从你感兴趣的角度继续了解，不要求一次完成。"
               expanded={expandedPanels.exploration}
               onToggle={togglePanel}
+              collapsedOnDesktop
             >
               <CareerExplorationBoard
                 roles={topRoles}
                 selectedRole={currentExplorationRole}
                 checks={currentExplorationChecks}
                 locked={locked}
-                onSelectRole={setSelectedExplorationRole}
+                onSelectRole={handleSelectExplorationRole}
                 onToggleCheck={toggleCareerExplorationCheck}
                 onOpenSearch={() => router.push('/coach/action/tools/opportunity-search')}
               />
-            </MobilePanel>
+            </MobilePanel> : null}
 
-            <div className="grid gap-4 min-[1280px]:grid-cols-2">
-            <MobilePanel
+            {visiblePanels.includes('profile') || visiblePanels.includes('updates') ? (
+            <div className={`grid gap-4 ${visiblePanels.includes('profile') && visiblePanels.includes('updates') ? 'min-[1280px]:grid-cols-2' : ''}`}>
+            {visiblePanels.includes('profile') ? <MobilePanel
               id="profile"
               title="资料概览"
               description="当前主线能力和岗位方向。"
               expanded={expandedPanels.profile}
               onToggle={togglePanel}
+              collapsedOnDesktop
             >
               <div className="space-y-4">
                 <div className="rounded-[1.6rem] border border-[#86B8FF]/16 bg-white/76 p-5 shadow-[0_18px_50px_rgba(15,23,42,0.06)] backdrop-blur">
@@ -2235,7 +2503,7 @@ export default function PathPage() {
                     <div className="rounded-2xl bg-slate-50 px-4 py-3">
                       <div className="text-xs font-semibold text-slate-500">当前行动</div>
                       <div className="mt-1 text-sm leading-6 text-slate-700">
-                        {boardSummary?.nextStep || '先围绕一个岗位补齐岗位需求、能力、经验和资源线索。'}
+                        {boardSummary?.nextStep || '你可以从岗位日常、真实职位描述、相邻岗位或从业者经验里选择一个入口。'}
                       </div>
                     </div>
                   </div>
@@ -2256,14 +2524,15 @@ export default function PathPage() {
                   </div>
                 </div>
               </div>
-            </MobilePanel>
+            </MobilePanel> : null}
 
-            <MobilePanel
+            {visiblePanels.includes('updates') ? <MobilePanel
               id="updates"
               title="资料板更新"
               description="确认右侧教练整理出的新判断。"
               expanded={expandedPanels.updates}
               onToggle={togglePanel}
+              collapsedOnDesktop
             >
               <div className="rounded-[1.6rem] border border-[#86B8FF]/16 bg-white/76 p-5 shadow-[0_18px_50px_rgba(15,23,42,0.06)] backdrop-blur">
               <div className="flex items-center gap-2 text-sm font-semibold text-[#2A6FA3]">
@@ -2293,8 +2562,7 @@ export default function PathPage() {
                   <Button
                     className="rounded-full bg-[#86B8FF]/80 text-[#225F91] shadow-sm hover:bg-[#78AAEE]"
                     onClick={() => {
-                      setBoardSummary(pendingBoardSummary);
-                      setPendingBoardSummary(null);
+                      confirmBoardUpdate(pendingBoardSummary);
                     }}
                   >
                     确认更新资料板
@@ -2302,19 +2570,28 @@ export default function PathPage() {
                 ) : null}
               </div>
             </div>
-            </MobilePanel>
+            </MobilePanel> : null}
             </div>
+            ) : null}
+
+            {visiblePanels.length === 0 ? (
+              <div className="rounded-[1.6rem] border border-dashed border-[#86B8FF]/28 bg-white/65 px-6 py-10 text-center shadow-[0_18px_50px_rgba(15,23,42,0.04)]">
+                <LayoutGrid className="mx-auto h-6 w-6 text-sky-400" />
+                <div className="mt-3 text-sm font-semibold text-[#2A6FA3]">面板暂时是空的</div>
+                <p className="mt-2 text-sm leading-6 text-slate-500">打开左上角菜单，添加你现在需要的模块。</p>
+              </div>
+            ) : null}
           </div>
 
           <aside id="coach" className="order-1 min-w-0 space-y-4 min-[768px]:order-2">
-            <div className="overflow-hidden rounded-[1.6rem] border border-[#86B8FF]/18 bg-white/76 shadow-[0_18px_55px_rgba(15,23,42,0.07)] backdrop-blur min-[768px]:sticky min-[768px]:top-4 min-[768px]:flex min-[768px]:h-[calc(100vh-2rem)] min-[768px]:max-h-[calc(100dvh-2rem)] min-[768px]:flex-col">
+            <div className="overflow-hidden rounded-[1.6rem] border border-[#86B8FF]/18 bg-white/76 shadow-[0_18px_55px_rgba(15,23,42,0.07)] backdrop-blur min-[768px]:sticky min-[768px]:top-4 min-[768px]:flex min-[768px]:h-[calc(100dvh-7rem)] min-[768px]:min-h-[520px] min-[768px]:max-h-[760px] min-[768px]:flex-col">
               <div className="flex items-center justify-between border-b border-slate-200/70 px-5 py-4">
                 <div>
                   <div className="flex items-center gap-2 text-sm font-semibold text-[#2A6FA3]">
                     <PanelRight className="h-4 w-4 text-sky-500" />
                     现实路径教练
                   </div>
-                  <p className="mt-1 text-xs leading-6 text-slate-500">先看现实，再谈推进。</p>
+                  <p className="mt-1 text-xs leading-6 text-slate-500">帮助你更好地把理想向现实推进。</p>
                 </div>
               </div>
 
@@ -2329,15 +2606,14 @@ export default function PathPage() {
                     <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-7 text-amber-900">
                       <div className="font-semibold">我整理出一版资料板更新建议</div>
                       <p className="mt-1">
-                        目前线索已经覆盖真实岗位需求、职位要求和下一步验证。候选方向是：{pendingBoardSummary.leastResistancePath}。确认后只更新资料板，不替你做最终决定。
+                        我把刚才对话里出现的岗位、能力和资源线索整理成了一版候选更新。候选方向是：{pendingBoardSummary.leastResistancePath}。确认后才会写入资料板，也不会替你做最终决定。
                       </p>
                       <div className="mt-3 flex gap-2">
                         <Button
                           size="sm"
                           className="rounded-full bg-[#86B8FF]/80 text-[#225F91] shadow-sm hover:bg-[#78AAEE]"
                           onClick={() => {
-                            setBoardSummary(pendingBoardSummary);
-                            setPendingBoardSummary(null);
+                            confirmBoardUpdate(pendingBoardSummary);
                           }}
                         >
                           确认更新资料板
@@ -2350,11 +2626,37 @@ export default function PathPage() {
                   ) : null}
                   {messages.map((msg, idx) => (
                     <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-[90%] rounded-2xl border border-[#86B8FF]/10 px-4 py-3 text-sm leading-7 shadow-sm ${msg.role === 'user' ? 'bg-[#86B8FF]/12 text-slate-700' : 'bg-white/80 text-slate-700'}`}>
+                      <div className={`max-w-[90%] rounded-2xl border px-4 py-3 text-sm leading-7 shadow-sm ${msg.role === 'user' ? 'border-[#D9D0EE]/55 bg-[#F7F3FF] text-slate-700' : 'border-[#B9D8F2]/60 bg-[#F2F8FF] text-slate-700'}`}>
                         <CoachMessageContent content={msg.content} />
                       </div>
                     </div>
                   ))}
+                  {!locked ? (
+                    <CapabilityEvidenceCoachDemo
+                      confirmed={demoEvidenceConfirmed}
+                      mode={demoEvidenceMode}
+                      draft={demoEvidenceDraft}
+                      onDraftChange={setDemoEvidenceDraft}
+                      onConfirm={() => {
+                        setDemoEvidenceConfirmed(true);
+                        setDemoEvidenceMode('idle');
+                        setDemoEvidenceDraft('');
+                      }}
+                      onChooseSupplement={() => {
+                        setDemoEvidenceMode('supplement');
+                        setDemoEvidenceDraft('');
+                      }}
+                      onSubmitFeedback={() => {
+                        if (!demoEvidenceDraft.trim()) return;
+                        setDemoEvidenceMode('submittedSupplement');
+                      }}
+                      onReset={() => {
+                        setDemoEvidenceConfirmed(false);
+                        setDemoEvidenceMode('idle');
+                        setDemoEvidenceDraft('');
+                      }}
+                    />
+                  ) : null}
                   {isCoachTyping ? <CoachTypingBubble /> : null}
                 </div>
               </div>
@@ -2364,7 +2666,7 @@ export default function PathPage() {
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   rows={3}
-                  placeholder={locked ? '先去天赋教练对话生成基础资料。' : '继续聊聊你的想法。'}
+                  placeholder={locked ? '先去天赋教练对话生成基础资料。' : '讲讲你最关心的现实问题'}
                   className="w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-sky-300"
                   disabled={locked || isCoachTyping}
                 />
@@ -2394,7 +2696,7 @@ export default function PathPage() {
             className="absolute inset-0 bg-slate-950/35 backdrop-blur-sm"
             onClick={() => setMenuOpen(false)}
           />
-          <nav className="absolute left-0 top-0 h-full w-[82vw] max-w-sm border-r border-[#86B8FF]/20 bg-white/92 p-5 shadow-2xl backdrop-blur">
+          <nav className="absolute left-0 top-0 flex h-full w-[82vw] max-w-sm flex-col border-r border-[#86B8FF]/20 bg-white/95 p-5 shadow-2xl backdrop-blur">
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Menu</div>
@@ -2409,33 +2711,84 @@ export default function PathPage() {
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="mt-6 space-y-2">
-              {[
-                { label: '个人中心', href: '/user', icon: UserRound },
-                { label: '现实路径教练', href: '#coach', icon: PanelRight },
-                { label: '职业报告', href: '/report', icon: FileText },
-                { label: '最小阻力路径', href: '#overview', icon: Compass },
-                { label: '任务列表', href: '#tasks', icon: ClipboardCheck },
-                { label: '今日觉察', href: '#reflection', icon: Heart },
-                { label: '行动力日历', href: '#calendar', icon: CalendarDays },
-                { label: '愿景板 / 资源板', href: '#modules', icon: LayoutGrid },
-                { label: '职业探索 Check 板', href: '#exploration', icon: BriefcaseBusiness },
-                { label: '岗位聚合搜索', href: '/coach/action/tools/opportunity-search', icon: Search },
-                { label: '资料概览', href: '#profile', icon: Target },
-                { label: '资料板更新', href: '#updates', icon: FilePenLine },
-              ].map((item) => (
-                <button
-                  key={item.label}
-                  type="button"
-                  onClick={() => closeMenuAndGo(item.href)}
-                  className="flex w-full items-center gap-3 rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-3 text-left text-sm font-semibold text-slate-700 shadow-sm"
-                >
-                  <item.icon className="h-4 w-4 text-sky-500" />
-                  {item.label}
-                </button>
-              ))}
+            <div className="mt-5 min-h-0 flex-1 space-y-5 overflow-y-auto pr-1">
+              <section>
+                <div className="flex items-center justify-between gap-3 px-2">
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">我的面板</div>
+                    <p className="mt-1 text-xs text-slate-500">选择要在左侧显示的内容</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={restoreRecommendedPanels}
+                    className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold text-[#2A6FA3] hover:bg-[#F3F8FF]"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    恢复推荐
+                  </button>
+                </div>
+                <div className="mt-3 space-y-1.5">
+                  {panelModules.map((item) => {
+                    const visible = visiblePanels.includes(item.id);
+                    return (
+                      <div key={item.id} className="flex items-center gap-2 rounded-xl px-2 py-2 transition-colors hover:bg-[#F3F8FF]">
+                        <button
+                          type="button"
+                          onClick={() => visible ? closeMenuAndGo(`#${item.id}`) : setPanelVisibility(item.id, true)}
+                          className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                        >
+                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#F3F8FF] text-sky-500">
+                            <item.icon className="h-4 w-4" />
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm font-semibold text-slate-700">{item.label}</span>
+                            <span className="mt-0.5 block truncate text-[11px] text-slate-400">{item.description}</span>
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={visible ? `从面板隐藏${item.label}` : `添加${item.label}到面板`}
+                          onClick={() => setPanelVisibility(item.id, !visible)}
+                          className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-full px-2 text-xs font-semibold transition-colors ${
+                            visible
+                              ? 'bg-emerald-50 text-emerald-700 hover:bg-slate-100 hover:text-slate-600'
+                              : 'bg-[#86B8FF]/16 text-[#2A6FA3] hover:bg-[#86B8FF]/25'
+                          }`}
+                        >
+                          {visible ? <EyeOff className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+                          {visible ? '隐藏' : '添加'}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+
+              <section className="border-t border-[#86B8FF]/14 pt-4">
+                <div className="px-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">固定入口</div>
+                <div className="mt-2 space-y-1">
+                  {[
+                    { label: '现实路径教练', href: '#coach', icon: PanelRight },
+                    { label: '职业报告', href: '/report', icon: FileText },
+                    { label: '岗位搜索', href: '/coach/action/tools/opportunity-search', icon: Search },
+                    { label: '个人中心', href: '/user', icon: UserRound },
+                  ].map((item) => (
+                    <button
+                      key={item.label}
+                      type="button"
+                      onClick={() => closeMenuAndGo(item.href)}
+                      className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-semibold text-slate-700 transition-colors hover:bg-[#F3F8FF] hover:text-[#2A6FA3]"
+                    >
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#F3F8FF] text-sky-500">
+                        <item.icon className="h-4 w-4" />
+                      </span>
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </section>
             </div>
-            <div className="mt-6 border-t border-[#86B8FF]/16 pt-4">
+            <div className="mt-4 shrink-0 border-t border-[#86B8FF]/16 pt-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2 text-sm font-bold text-[#2A6FA3]">
                   <FileText className="h-4 w-4 text-sky-500" />
@@ -2445,7 +2798,7 @@ export default function PathPage() {
                   {conversationArchives.length}
                 </Badge>
               </div>
-              <div className="mt-3 max-h-[36vh] space-y-2 overflow-y-auto pr-1">
+              <div className="mt-3 max-h-40 space-y-2 overflow-y-auto pr-1">
                 {conversationArchives.length ? conversationArchives.map((archive) => (
                   <button
                     key={archive.id}

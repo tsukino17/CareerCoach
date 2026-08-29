@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import { usePathname } from 'next/navigation';
-import { trackEvent } from '@/lib/analytics-client';
+import { getAnalyticsContext, trackEvent } from '@/lib/analytics-client';
 
 function getTrafficSource() {
   const params = new URLSearchParams(window.location.search);
@@ -57,6 +57,18 @@ export default function AnalyticsPageViewTracker() {
     const trafficSource = getTrafficSource();
     const feature = getFeatureFromPath(pathname);
 
+    const { sessionId } = getAnalyticsContext();
+    const recordedSessionId = window.localStorage.getItem('career_analytics_session_event_id');
+    if (sessionId && sessionId !== recordedSessionId) {
+      window.localStorage.setItem('career_analytics_session_event_id', sessionId);
+      void trackEvent({
+        eventName: 'session_started',
+        page: pathname,
+        status: 'start',
+        metadata: { ...getSiteMetadata(), trafficSource, feature },
+      });
+    }
+
     const updateScrollDepth = () => {
       const scrollable = document.documentElement.scrollHeight - window.innerHeight;
       if (scrollable <= 0) {
@@ -100,6 +112,15 @@ export default function AnalyticsPageViewTracker() {
         url: window.location.href,
       },
     });
+
+    if (feature === 'talent_chat' || feature === 'talent_report' || feature === 'career_path') {
+      void trackEvent({
+        eventName: 'meaningful_page_view',
+        page: pathname,
+        status: 'success',
+        metadata: { ...getSiteMetadata(), trafficSource, feature },
+      });
+    }
 
     updateScrollDepth();
     window.addEventListener('scroll', updateScrollDepth, { passive: true });

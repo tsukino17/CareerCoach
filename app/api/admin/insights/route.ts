@@ -130,7 +130,8 @@ function asNumber(value: unknown) {
 }
 
 function getVisitorKey(event: EventRow) {
-  return event.user_id || event.session_id || null;
+  const anonymousVisitorId = event.metadata?.anonymousVisitorId;
+  return event.user_id || (typeof anonymousVisitorId === 'string' ? anonymousVisitorId : null) || event.session_id || null;
 }
 
 function getTextValue(value: unknown, fallback = 'unknown') {
@@ -223,10 +224,29 @@ export async function GET(req: Request) {
     const eventNameMap = new Map<string, number>();
     const dailyAuthenticatedMap = new Map<string, Set<string>>();
     const dailyEngagementMap = new Map<string, { totalDurationMs: number; count: number }>();
+    const visitorActivityMap = new Map<string, Set<string>>();
+    const visitorMeaningfulActivityMap = new Map<string, Set<string>>();
+    const visitorSessionMap = new Map<string, Set<string>>();
 
     for (const e of events) {
       if (!e.created_at) continue;
       const d = dayKey(e.created_at);
+      const visitorKey = getVisitorKey(e);
+      if (visitorKey) {
+        const activity = visitorActivityMap.get(visitorKey) || new Set<string>();
+        activity.add(d);
+        visitorActivityMap.set(visitorKey, activity);
+        if (['anonymous_chat_message', 'chat_message_sent', 'meaningful_page_view', 'report_generation_success', 'path_opened', 'meaningful_action_completed'].includes(e.event_name || '')) {
+          const meaningful = visitorMeaningfulActivityMap.get(visitorKey) || new Set<string>();
+          meaningful.add(d);
+          visitorMeaningfulActivityMap.set(visitorKey, meaningful);
+        }
+        if (e.session_id) {
+          const sessions = visitorSessionMap.get(visitorKey) || new Set<string>();
+          sessions.add(e.session_id);
+          visitorSessionMap.set(visitorKey, sessions);
+        }
+      }
       if (e.event_name) addCount(eventNameMap, e.event_name);
       if (e.user_id) {
         const users = dailyAuthenticatedMap.get(d) || new Set<string>();
@@ -330,6 +350,15 @@ export async function GET(req: Request) {
       .map(([date, count]) => ({ date, count }));
 
     const uniqueVisitors = new Set(events.map(getVisitorKey).filter(Boolean)).size;
+    const repeatVisitors = Array.from(visitorActivityMap.values()).filter((days) => days.size >= 2).length;
+    const repeatMeaningfulUsers = Array.from(visitorMeaningfulActivityMap.values()).filter((days) => days.size >= 2).length;
+    const activeDayBuckets = { '1天': 0, '2-3天': 0, '4-6天': 0, '7天及以上': 0 };
+    for (const days of visitorActivityMap.values()) {
+      if (days.size === 1) activeDayBuckets['1天'] += 1;
+      else if (days.size <= 3) activeDayBuckets['2-3天'] += 1;
+      else if (days.size <= 6) activeDayBuckets['4-6天'] += 1;
+      else activeDayBuckets['7天及以上'] += 1;
+    }
     const authenticatedVisitors = new Set(events.map((event) => event.user_id).filter(Boolean)).size;
     const totalEngagementMs = Array.from(pageStatsMap.values()).reduce((sum, item) => sum + item.totalDurationMs, 0);
     const totalEngagementCount = Array.from(pageStatsMap.values()).reduce((sum, item) => sum + item.engagementCount, 0);
@@ -343,6 +372,62 @@ export async function GET(req: Request) {
         page: event.page || 'unknown',
         visitor: event.user_id ? `user:${event.user_id.slice(0, 8)}` : event.session_id ? `anon:${event.session_id.slice(-8)}` : 'unknown',
         userAgent: event.user_agent || '',
+      }));
+
+    const journeyMap = new Map<string, {
+      visitor: string;
+      userId: string | null;
+      sessions: Set<string>;
+      chatTurns: number;
+      reportsGenerated: number;
+      reportViews: number;
+      reportEngagementMs: number;
+      shares: number;
+      pathMessages: number;
+      actionsCompleted: number;
+      lastAt: string | null;
+    }>();
+    for (const event of events) {
+      const visitor = getVisitorKey(event);
+      if (!visitor) continue;
+      const item = journeyMap.get(visitor) || {
+        visitor,
+        userId: event.user_id,
+        sessions: new Set<string>(),
+        chatTurns: 0,
+        reportsGenerated: 0,
+        reportViews: 0,
+        reportEngagementMs: 0,
+        shares: 0,
+        pathMessages: 0,
+        actionsCompleted: 0,
+        lastAt: event.created_at,
+      };
+      if (event.session_id) item.sessions.add(event.session_id);
+      if (event.created_at && (!item.lastAt || event.created_at > item.lastAt)) item.lastAt = event.created_at;
+      if (event.event_name === 'chat_message_sent' || (event.event_name === 'anonymous_chat_message' && event.metadata?.role === 'user')) item.chatTurns += 1;
+      if (event.event_name === 'report_generation_success') item.reportsGenerated += 1;
+      if (event.event_name === 'report_viewed') item.reportViews += 1;
+      if (event.event_name === 'report_engagement') item.reportEngagementMs += asNumber(event.metadata?.durationMs);
+      if (event.event_name === 'report_shared' || event.event_name === 'report_image_saved') item.shares += 1;
+      if (event.event_name === 'path_chat_message_sent') item.pathMessages += 1;
+      if (event.event_name === 'action_completed') item.actionsCompleted += 1;
+      journeyMap.set(visitor, item);
+    }
+    const userJourneys = Array.from(journeyMap.values())
+      .sort((a, b) => String(b.lastAt).localeCompare(String(a.lastAt)))
+      .slice(0, 100)
+      .map((item) => ({
+        visitor: item.userId ? `user:${item.userId.slice(0, 8)}` : `anon:${item.visitor.slice(-8)}`,
+        sessions: item.sessions.size,
+        chatTurns: item.chatTurns,
+        reportsGenerated: item.reportsGenerated,
+        reportViews: item.reportViews,
+        reportEngagementMs: item.reportEngagementMs,
+        shares: item.shares,
+        pathMessages: item.pathMessages,
+        actionsCompleted: item.actionsCompleted,
+        lastAt: item.lastAt,
       }));
 
     const { data: messagesData, error: messagesError } = await supabaseAdmin
@@ -486,6 +571,7 @@ export async function GET(req: Request) {
         }),
       pageStats,
       recentVisitors,
+      userJourneys,
       sourceStats: mapToRank(sourceMap),
       cityStats: mapToRank(cityMap),
       featureStats: mapToRank(featureMap),
@@ -525,6 +611,14 @@ export async function GET(req: Request) {
         authenticatedVisitors,
         avgEngagementMs,
         avgEngagementLabel: formatDuration(avgEngagementMs),
+      },
+      retention: {
+        visitors: uniqueVisitors,
+        repeatVisitors,
+        repeatVisitorRate: uniqueVisitors > 0 ? Number(((repeatVisitors / uniqueVisitors) * 100).toFixed(1)) : 0,
+        repeatMeaningfulUsers,
+        repeatMeaningfulRate: uniqueVisitors > 0 ? Number(((repeatMeaningfulUsers / uniqueVisitors) * 100).toFixed(1)) : 0,
+        activeDayBuckets,
       },
     });
   } catch (error) {
