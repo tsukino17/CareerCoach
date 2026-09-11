@@ -100,8 +100,11 @@ async function buildPeriodicReport(supabase: SupabaseClient, now: Date, cadence:
     since.setUTCMonth(since.getUTCMonth() - 1);
     since.setUTCHours(0, 0, 0, 0);
   } else {
-    since.setUTCDate(since.getUTCDate() - 6);
+    const daysSinceMonday = (beijingNow.getUTCDay() + 6) % 7;
+    since.setUTCDate(since.getUTCDate() - daysSinceMonday - 7);
     since.setUTCHours(0, 0, 0, 0);
+    until.setUTCDate(until.getUTCDate() - daysSinceMonday - 1);
+    until.setUTCHours(23, 59, 59, 999);
   }
   const start = since.toISOString();
   const end = until.toISOString();
