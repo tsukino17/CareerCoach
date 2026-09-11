@@ -4,6 +4,7 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { clearAuthRedirectContext, isSafeAuthNextPath, readAuthRedirectContext } from '@/lib/auth-redirect-context';
 
 function parseFriendlyError(message: string) {
   const text = message.toLowerCase();
@@ -45,7 +46,12 @@ function AuthCallbackContent() {
   const [error, setError] = useState<string | null>(null);
   const [rawError, setRawError] = useState<string | null>(null);
 
-  const nextPath = useMemo(() => searchParams.get('next') || '/chat', [searchParams]);
+  const redirectContext = useMemo(() => readAuthRedirectContext(), []);
+  const nextPath = useMemo(() => {
+    const requestedPath = searchParams.get('next');
+    if (isSafeAuthNextPath(requestedPath)) return requestedPath;
+    return redirectContext?.nextPath || '/chat';
+  }, [redirectContext, searchParams]);
 
   useEffect(() => {
     let cancelled = false;
@@ -114,10 +120,10 @@ function AuthCallbackContent() {
             Authorization: `Bearer ${session.access_token}`,
           },
           body: JSON.stringify({
-            termsAccepted: searchParams.get('terms_accepted') === '1',
-            trainingConsent: searchParams.get('training_consent') === '1',
-            policyVersion: searchParams.get('policy_version') || 'v2026-05',
-            draftToken: searchParams.get('draft_token'),
+            termsAccepted: searchParams.get('terms_accepted') === '1' || redirectContext?.termsAccepted === true,
+            trainingConsent: searchParams.get('training_consent') === '1' || redirectContext?.trainingConsent === true,
+            policyVersion: searchParams.get('policy_version') || redirectContext?.policyVersion || 'v2026-05',
+            draftToken: searchParams.get('draft_token') || redirectContext?.draftToken || null,
           }),
         });
 
@@ -125,8 +131,22 @@ function AuthCallbackContent() {
           throw new Error('finalize_failed');
         }
 
+        const draftToken = searchParams.get('draft_token') || redirectContext?.draftToken;
+        if (draftToken) {
+          const claimResponse = await fetch('/api/career-path/claim', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ accessToken: session.access_token, draftToken }),
+          });
+
+          if (!claimResponse.ok) {
+            throw new Error('draft_claim_failed');
+          }
+        }
+
         if (cancelled) return;
-        router.replace(nextPath);
+        clearAuthRedirectContext();
+        router.replace(nextPath || '/chat');
       } catch (err) {
         if (cancelled) return;
         const raw = err instanceof Error ? err.message : 'unknown_error';
@@ -140,7 +160,7 @@ function AuthCallbackContent() {
     return () => {
       cancelled = true;
     };
-  }, [nextPath, router, searchParams]);
+  }, [nextPath, redirectContext, router, searchParams]);
 
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-10">
@@ -154,10 +174,8 @@ function AuthCallbackContent() {
           <button
             type="button"
             onClick={() => {
-              const params = new URLSearchParams({
-                error: rawError || error,
-                next: nextPath,
-              });
+              const params = new URLSearchParams({ error: rawError || error });
+              if (nextPath) params.set('next', nextPath);
               router.replace(`/auth/auth-code-error?${params.toString()}`);
             }}
             className="mt-6 rounded-xl bg-sky-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-600"

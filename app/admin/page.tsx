@@ -22,6 +22,18 @@ type RecentVisitor = {
   visitor: string;
   userAgent: string;
 };
+type UserJourney = {
+  visitor: string;
+  sessions: number;
+  chatTurns: number;
+  reportsGenerated: number;
+  reportViews: number;
+  reportEngagementMs: number;
+  shares: number;
+  pathMessages: number;
+  actionsCompleted: number;
+  lastAt: string | null;
+};
 type RankStat = { name: string; count: number };
 type RangePreset = 'today' | '7d' | '30d' | 'custom';
 type InputSample = { at: string | null; category: string; preview: string; chars: number };
@@ -67,6 +79,7 @@ type InsightsResponse = {
   dailyMetrics?: DailyMetric[];
   pageStats: PageStat[];
   recentVisitors: RecentVisitor[];
+  userJourneys?: UserJourney[];
   sourceStats: RankStat[];
   cityStats: RankStat[];
   featureStats: RankStat[];
@@ -101,6 +114,14 @@ type InsightsResponse = {
     uniqueVisitors: number;
     authenticatedVisitors: number;
     avgEngagementLabel: string;
+  };
+  retention?: {
+    visitors: number;
+    repeatVisitors: number;
+    repeatVisitorRate: number;
+    repeatMeaningfulUsers: number;
+    repeatMeaningfulRate: number;
+    activeDayBuckets: Record<string, number>;
   };
 };
 
@@ -364,6 +385,10 @@ export default function AdminPage() {
               />
             </section>
 
+            <RetentionPanel retention={data.retention} />
+
+            <UserJourneyPanel journeys={data.userJourneys || []} />
+
             <section className="grid gap-4 md:grid-cols-3">
               <RankCard title="访问来源" items={data.sourceStats} empty="暂无来源数据" />
               <RankCard title="访问城市" items={data.cityStats} empty="暂无城市数据" />
@@ -467,6 +492,70 @@ function RangeButton({
     >
       {children}
     </button>
+  );
+}
+
+function RetentionPanel({ retention }: { retention: InsightsResponse['retention'] }) {
+  if (!retention) return null;
+  const repeatRate = `${retention.repeatVisitorRate}%`;
+  const meaningfulRate = `${retention.repeatMeaningfulRate}%`;
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-900">回访与使用粘性</h2>
+          <p className="mt-1 text-sm text-slate-500">区分重新打开网站、继续使用和重复获得价值</p>
+        </div>
+        <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">当前日期范围</span>
+      </div>
+      <div className="mt-5 grid gap-3 sm:grid-cols-3">
+        <RetentionMetric label="回访用户" value={`${retention.repeatVisitors} 人`} detail={`占访客 ${repeatRate}`} />
+        <RetentionMetric label="重复有效使用" value={`${retention.repeatMeaningfulUsers} 人`} detail={`占访客 ${meaningfulRate}`} />
+        <RetentionMetric label="访客总数" value={`${retention.visitors} 人`} detail="按登录用户或匿名访客去重" />
+      </div>
+      <div className="mt-5">
+        <p className="text-sm font-medium text-slate-700">按活跃天数分布</p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-4">
+          {Object.entries(retention.activeDayBuckets).map(([label, count]) => (
+            <div key={label} className="rounded-xl bg-slate-50 px-3 py-3">
+              <p className="text-xs text-slate-500">{label}</p>
+              <p className="mt-1 text-lg font-semibold text-slate-900">{count}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function UserJourneyPanel({ journeys }: { journeys: UserJourney[] }) {
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-6">
+      <div>
+        <h2 className="text-lg font-semibold text-slate-900">用户行为旅程</h2>
+        <p className="mt-1 text-sm text-slate-500">按匿名访客 ID 或登录用户 ID 聚合：会话、对话轮次、报告、停留、分享和行动</p>
+      </div>
+      <div className="mt-4 overflow-x-auto rounded-xl border border-slate-100">
+        <div className="min-w-[900px] grid grid-cols-9 gap-3 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">
+          <span>用户</span><span>会话</span><span>聊天轮次</span><span>出报告</span><span>报告查看</span><span>报告停留</span><span>分享/保存</span><span>路径对话</span><span>行动完成</span>
+        </div>
+        {journeys.length === 0 ? <p className="px-3 py-4 text-sm text-slate-500">暂无行为旅程数据。</p> : journeys.slice(0, 30).map((item) => (
+          <div key={item.visitor} className="min-w-[900px] grid grid-cols-9 gap-3 border-t border-slate-100 px-3 py-2 text-sm">
+            <span className="font-medium text-slate-800">{item.visitor}</span><span>{item.sessions}</span><span>{item.chatTurns}</span><span>{item.reportsGenerated}</span><span>{item.reportViews}</span><span>{Math.round(item.reportEngagementMs / 1000)}秒</span><span>{item.shares}</span><span>{item.pathMessages}</span><span>{item.actionsCompleted}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function RetentionMetric({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return (
+    <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
+      <p className="text-sm text-slate-500">{label}</p>
+      <p className="mt-1 text-2xl font-semibold text-slate-900">{value}</p>
+      <p className="mt-1 text-xs text-slate-500">{detail}</p>
+    </div>
   );
 }
 

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { isAllowedOrigin } from '@/lib/request-security';
 import { isAdminEmail } from '@/lib/admin-auth';
+import { isLocalAdminRequest } from '@/lib/admin-auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,6 +25,9 @@ function getRequestOrigin(req: Request) {
 export async function POST(req: Request) {
   let email = '';
   try {
+    if (!isLocalAdminRequest(req)) {
+      return NextResponse.json({ error: '管理员入口仅允许本机访问。' }, { status: 403 });
+    }
     if (!isAllowedOrigin(req)) {
       return NextResponse.json({ error: 'Forbidden origin' }, { status: 403 });
     }

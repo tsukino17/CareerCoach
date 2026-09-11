@@ -71,7 +71,7 @@ export default function UserCenterPage() {
             >
               <NavItem label="历史对话" href="/chat" icon={<ChatIcon />} />
               <NavItem label="我的报告" href="/report" icon={<ReportIcon />} badge="New" />
-              <NavItem label="行动力教练" href="/coach/action" icon={<ActionIcon />} />
+              <NavItem label="现实路径教练" href="/path" icon={<ActionIcon />} />
             </div>
           </section>
 
@@ -104,7 +104,7 @@ export default function UserCenterPage() {
                   <CalendarIcon />
                 </div>
                 <div>
-                  <div style={{ fontSize: 16, fontWeight: 800, color: '#0f172a' }}>行动力教练</div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: '#0f172a' }}>现实路径教练</div>
                   <div style={{ marginTop: 4, color: 'rgba(15,23,42,0.55)', fontSize: 13 }}>
                     你的记录会自然累积在这里
                   </div>
@@ -117,7 +117,7 @@ export default function UserCenterPage() {
 
               <div style={{ marginTop: 16, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                 <Link
-                  href="/coach/action"
+                  href="/path"
                   style={{
                     display: 'inline-block',
                     borderRadius: 999,
@@ -297,4 +297,3 @@ function CalendarIcon() {
     </svg>
   );
 }
-

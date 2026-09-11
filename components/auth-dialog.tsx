@@ -1,7 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
+import { AUTH_REDIRECT_CONTEXT_KEY } from '@/lib/auth-redirect-context';
 import { Button } from '@/components/ui/button';
 import { X, Loader2, Mail, Lock } from 'lucide-react';
 
@@ -9,14 +12,103 @@ interface AuthDialogProps {
   isOpen: boolean;
   onClose: () => void;
   onAuthSuccess: () => void;
+  nextPath?: string;
+  draftToken?: string | null;
 }
 
-export function AuthDialog({ isOpen, onClose, onAuthSuccess }: AuthDialogProps) {
+export function AuthDialog({ isOpen, onClose, onAuthSuccess, nextPath, draftToken }: AuthDialogProps) {
+  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [mode, setMode] = useState<'sign_in' | 'sign_up'>('sign_in');
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [trainingConsent, setTrainingConsent] = useState(false);
+
+  const claimCareerDraft = async (accessToken: string) => {
+    if (!draftToken) return true;
+
+    const response = await fetch('/api/career-path/claim', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accessToken, draftToken }),
+    });
+
+    if (response.ok) return true;
+    const body = (await response.json().catch(() => null)) as { error?: string } | null;
+    setError(body?.error || '职业报告保存失败，请稍后重试。');
+    return false;
+  };
+
+  const finalizeProfile = async () => {
+    const { data } = await supabase.auth.getSession();
+    const accessToken = data.session?.access_token;
+    if (!accessToken) {
+      setError('登录状态未准备完成，请稍后重试。');
+      return false;
+    }
+
+    try {
+      const response = await fetch('/api/auth/finalize', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          termsAccepted,
+          trainingConsent,
+          policyVersion: 'v2026-05',
+          draftToken: draftToken || null,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('资料初始化失败');
+      }
+
+      return accessToken;
+    } catch (error) {
+      console.error('Profile initialization failed:', error);
+      setError('登录成功，但资料初始化失败。请稍后重试。');
+      return null;
+    }
+  };
+
+  const buildCallbackUrl = () => {
+    const callbackUrl = new URL('/auth/callback', window.location.origin);
+    if (nextPath) callbackUrl.searchParams.set('next', nextPath);
+    if (draftToken) callbackUrl.searchParams.set('draft_token', draftToken);
+    callbackUrl.searchParams.set('terms_accepted', termsAccepted ? '1' : '0');
+    callbackUrl.searchParams.set('training_consent', trainingConsent ? '1' : '0');
+    callbackUrl.searchParams.set('policy_version', 'v2026-05');
+    return callbackUrl.toString();
+  };
+
+  const saveAuthRedirectContext = () => {
+    if (!nextPath) return;
+    window.sessionStorage.setItem(AUTH_REDIRECT_CONTEXT_KEY, JSON.stringify({
+      nextPath,
+      draftToken: draftToken || null,
+      termsAccepted,
+      trainingConsent,
+      policyVersion: 'v2026-05',
+    }));
+  };
+
+  const completeAuthentication = async () => {
+    const accessToken = await finalizeProfile();
+    if (!accessToken) return;
+    if (!(await claimCareerDraft(accessToken))) return;
+
+    onAuthSuccess();
+    onClose();
+    if (nextPath) {
+      router.push(nextPath);
+    }
+  };
 
   // Poll for session status when waiting for email confirmation
   useEffect(() => {
@@ -32,13 +124,12 @@ export function AuthDialog({ isOpen, onClose, onAuthSuccess }: AuthDialogProps) 
             
             if (data.session) {
                 clearInterval(interval);
-                onAuthSuccess();
-                onClose();
+                void completeAuthentication();
             }
         }, 3000); // Check every 3 seconds
     }
     return () => clearInterval(interval);
-  }, [isOpen, successMessage, email, password, onAuthSuccess, onClose]);
+  }, [isOpen, successMessage, email, password, onAuthSuccess, onClose, nextPath, draftToken]);
 
   if (!isOpen) return null;
 
@@ -56,10 +147,19 @@ export function AuthDialog({ isOpen, onClose, onAuthSuccess }: AuthDialogProps) 
       });
 
       if (!signInError && signInData.session) {
-        onAuthSuccess();
-        onClose();
+        await completeAuthentication();
         return;
       }
+
+      if (mode === 'sign_in') {
+        throw new Error('邮箱或密码不正确。若忘记密码，请重新获取登录邮件。');
+      }
+
+      if (!termsAccepted) {
+        throw new Error('请先阅读并同意用户协议与隐私政策。');
+      }
+
+      saveAuthRedirectContext();
 
       // 2. If Sign In failed, check if it's a credential issue
       // If so, try to Sign Up (assuming user might be new)
@@ -76,7 +176,7 @@ export function AuthDialog({ isOpen, onClose, onAuthSuccess }: AuthDialogProps) 
           email,
           password,
           options: {
-            emailRedirectTo: `${window.location.origin}/auth/callback`,
+            emailRedirectTo: buildCallbackUrl(),
           },
         });
 
@@ -100,8 +200,7 @@ export function AuthDialog({ isOpen, onClose, onAuthSuccess }: AuthDialogProps) 
 
         // Sign Up successful
         if (signUpData.session) {
-            onAuthSuccess();
-            onClose();
+            await completeAuthentication();
             return;
         } else if (signUpData.user && !signUpData.session) {
              // Registration successful but needs confirmation
@@ -139,6 +238,23 @@ export function AuthDialog({ isOpen, onClose, onAuthSuccess }: AuthDialogProps) 
           </p>
         </div>
 
+        <div className="mb-5 grid grid-cols-2 rounded-xl bg-slate-100 p-1 text-sm font-medium">
+          <button
+            type="button"
+            onClick={() => { setMode('sign_in'); setError(null); setSuccessMessage(null); }}
+            className={mode === 'sign_in' ? 'rounded-lg bg-white px-3 py-2 text-slate-900 shadow-sm' : 'rounded-lg px-3 py-2 text-slate-500'}
+          >
+            登录
+          </button>
+          <button
+            type="button"
+            onClick={() => { setMode('sign_up'); setError(null); setSuccessMessage(null); }}
+            className={mode === 'sign_up' ? 'rounded-lg bg-white px-3 py-2 text-slate-900 shadow-sm' : 'rounded-lg px-3 py-2 text-slate-500'}
+          >
+            注册
+          </button>
+        </div>
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <label className="text-sm font-medium text-gray-700 ml-1">邮箱</label>
@@ -154,6 +270,19 @@ export function AuthDialog({ isOpen, onClose, onAuthSuccess }: AuthDialogProps) 
               />
             </div>
           </div>
+
+          {mode === 'sign_up' ? (
+            <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600">
+              <label className="flex cursor-pointer items-start gap-2">
+                <input type="checkbox" checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} className="mt-1" />
+                <span>我已阅读并同意 <Link href="/legal/privacy-policy" target="_blank" className="text-sky-700 underline">用户协议与隐私政策</Link></span>
+              </label>
+              <label className="flex cursor-pointer items-start gap-2">
+                <input type="checkbox" checked={trainingConsent} onChange={(event) => setTrainingConsent(event.target.checked)} className="mt-1" />
+                <span>我同意将去标识化对话数据用于产品与模型改进（可选，之后可在个人资料中修改）。</span>
+              </label>
+            </div>
+          ) : null}
 
           <div className="space-y-2">
             <label className="text-sm font-medium text-gray-700 ml-1">密码</label>
@@ -191,12 +320,12 @@ export function AuthDialog({ isOpen, onClose, onAuthSuccess }: AuthDialogProps) 
             {loading ? (
               <Loader2 className="w-5 h-5 animate-spin mr-2" />
             ) : null}
-            登录 / 注册
+            {mode === 'sign_in' ? '登录' : '创建账号并发送验证邮件'}
           </Button>
         </form>
 
         <p className="mt-6 text-center text-xs text-gray-400">
-          继续即代表你同意我们的服务条款和隐私政策
+          {mode === 'sign_in' ? '忘记密码或验证链接过期？可重新获取登录邮件。' : '注册后需要通过邮箱验证才能保存职业资料。'}
         </p>
       </div>
     </div>

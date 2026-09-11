@@ -1,9 +1,25 @@
+"use client";
+
+import { useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 
-export const dynamic = 'force-static';
-
 export default function Home() {
+  const router = useRouter();
+
+  useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const isAuthRedirect = ["code", "token_hash", "token", "access_token", "error", "error_code"].some(
+      (key) => searchParams.has(key) || hashParams.has(key),
+    );
+
+    if (isAuthRedirect) {
+      router.replace(`/auth/callback${window.location.search}${window.location.hash}`);
+    }
+  }, [router]);
+
   return (
     <main className="flex min-h-screen flex-col items-center justify-center p-6 text-center relative overflow-hidden">
       {/* Background Ambience */}

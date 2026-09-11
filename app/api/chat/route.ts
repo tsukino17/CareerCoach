@@ -1,6 +1,7 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { streamText, tool } from 'ai';
 import { z } from 'zod';
+import { COACH_MESSAGE_FORMATTING_RULES } from '@/lib/coach-message-formatting';
 import { GENTLE_BREEZE_V4_CHAT_PROMPT } from '@/lib/prompt-versions';
 import { checkRateLimitDistributed, getClientIp, normalizeMessages, rateLimitResponse } from '@/lib/rate-limit';
 
@@ -52,7 +53,7 @@ export async function POST(req: Request) {
       (message) => message.role === 'user' && message.content.startsWith(CONTINUE_CHAT_CONTROL_PREFIX)
     );
 
-    let systemPrompt = GENTLE_BREEZE_V4_CHAT_PROMPT;
+    let systemPrompt = `${GENTLE_BREEZE_V4_CHAT_PROMPT}\n\n${COACH_MESSAGE_FORMATTING_RULES}`;
     systemPrompt += `
       **Tools**:
       - You have access to a "getSalaryInsight" tool. If the user asks about salary trends or market rates for a specific role and city, USE THIS TOOL to get data, then incorporate the findings into your empathetic response. Do not make up numbers if you can use the tool.
@@ -119,7 +120,7 @@ export async function POST(req: Request) {
           },
         }),
       },
-      maxSteps: 5,
+      maxSteps: 2,
     });
   
     return result.toDataStreamResponse({

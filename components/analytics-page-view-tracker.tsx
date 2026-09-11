@@ -2,25 +2,40 @@
 
 import { useEffect } from 'react';
 import { usePathname } from 'next/navigation';
-import { trackEvent } from '@/lib/analytics-client';
+import { getAnalyticsContext, trackEvent } from '@/lib/analytics-client';
 
-function getTrafficSource() {
+type TrafficAttribution = {
+  source: string;
+  medium: string;
+  campaign: string;
+};
+
+function getTrafficSource(): TrafficAttribution {
   const params = new URLSearchParams(window.location.search);
-  const utmSource = params.get('utm_source');
-  if (utmSource) return utmSource;
+  const utmSource = params.get('utm_source')?.trim() || '';
+  const utmMedium = params.get('utm_medium')?.trim() || '';
+  const utmCampaign = params.get('utm_campaign')?.trim() || '';
 
   const referrer = document.referrer;
-  if (!referrer) return 'direct';
+  if (!referrer) {
+    return { source: utmSource || 'direct', medium: utmMedium || 'direct', campaign: utmCampaign };
+  }
 
   try {
     const referrerHost = new URL(referrer).hostname.replace(/^www\./, '');
     const currentHost = window.location.hostname.replace(/^www\./, '');
-    if (referrerHost === currentHost) return 'internal';
-    if (/baidu|google|bing|sogou|so\.com|sm\.cn/i.test(referrerHost)) return 'search';
-    if (/weixin|wechat|qq\.com|douyin|xiaohongshu|zhihu|weibo/i.test(referrerHost)) return 'social';
-    return referrerHost;
+    if (referrerHost === currentHost) {
+      return { source: utmSource || 'internal', medium: utmMedium || 'internal', campaign: utmCampaign };
+    }
+    let medium = utmMedium;
+    if (!medium) {
+      if (/baidu|google|bing|sogou|so\.com|sm\.cn/i.test(referrerHost)) medium = 'search';
+      else if (/weixin|wechat|qq\.com|douyin|xiaohongshu|zhihu|weibo/i.test(referrerHost)) medium = 'social';
+      else medium = 'referral';
+    }
+    return { source: utmSource || referrerHost, medium, campaign: utmCampaign };
   } catch {
-    return 'referral';
+    return { source: utmSource || 'referral', medium: utmMedium || 'referral', campaign: utmCampaign };
   }
 }
 
@@ -54,8 +69,21 @@ export default function AnalyticsPageViewTracker() {
     const startedAt = Date.now();
     let maxScrollDepth = 0;
     let sent = false;
-    const trafficSource = getTrafficSource();
+    const traffic = getTrafficSource();
+    const trafficMeta = { trafficSource: traffic.source, trafficMedium: traffic.medium, trafficCampaign: traffic.campaign };
     const feature = getFeatureFromPath(pathname);
+
+    const { sessionId } = getAnalyticsContext();
+    const recordedSessionId = window.localStorage.getItem('career_analytics_session_event_id');
+    if (sessionId && sessionId !== recordedSessionId) {
+      window.localStorage.setItem('career_analytics_session_event_id', sessionId);
+      void trackEvent({
+        eventName: 'session_started',
+        page: pathname,
+        status: 'start',
+        metadata: { ...getSiteMetadata(), ...trafficMeta, feature },
+      });
+    }
 
     const updateScrollDepth = () => {
       const scrollable = document.documentElement.scrollHeight - window.innerHeight;
@@ -79,7 +107,7 @@ export default function AnalyticsPageViewTracker() {
           ...getSiteMetadata(),
           durationMs: Date.now() - startedAt,
           maxScrollDepth,
-          trafficSource,
+          ...trafficMeta,
           feature,
         },
       });
@@ -94,12 +122,21 @@ export default function AnalyticsPageViewTracker() {
       page: pathname,
       metadata: {
         ...getSiteMetadata(),
-        trafficSource,
+        ...trafficMeta,
         feature,
         referrer: document.referrer || '',
         url: window.location.href,
       },
     });
+
+    if (feature === 'talent_chat' || feature === 'talent_report' || feature === 'career_path') {
+      void trackEvent({
+        eventName: 'meaningful_page_view',
+        page: pathname,
+        status: 'success',
+        metadata: { ...getSiteMetadata(), ...trafficMeta, feature },
+      });
+    }
 
     updateScrollDepth();
     window.addEventListener('scroll', updateScrollDepth, { passive: true });

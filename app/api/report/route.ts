@@ -9,6 +9,11 @@ import { filterCareerProfileMaterialMessages } from '@/lib/career-path';
 export const runtime = 'nodejs';
 export const maxDuration = 120;
 
+function isRateLimitError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || '');
+  return /(?:^|\D)429(?:\D|$)|too many requests|rate limit|请求过于密集/i.test(message);
+}
+
 const UI_ACTION_PREFIXES = ['[EchoTalent UI Action:'];
 const MAX_REPORT_MESSAGES = 28;
 const MAX_REPORT_CONTENT_LENGTH = 1000;
@@ -87,6 +92,12 @@ export async function POST(req: Request) {
     });
   } catch (error) {
     console.error('Report Generation Error:', error);
+    if (isRateLimitError(error)) {
+      return new Response(JSON.stringify({ error: '模型请求过于密集，请稍后再试。' }), {
+        status: 429,
+        headers: { 'Content-Type': 'application/json', 'Retry-After': '10' },
+      });
+    }
     return new Response(JSON.stringify({ error: 'Failed to generate report' }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' },

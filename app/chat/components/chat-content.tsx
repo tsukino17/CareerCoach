@@ -235,6 +235,7 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
     const batchId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const anonymousVisitorId = getOrCreateLocalId(ANONYMOUS_VISITOR_KEY, 'anon_visitor');
     const anonymousConversationId = getOrCreateLocalId(ANONYMOUS_CONVERSATION_KEY, 'anon_conv');
+    const turnNumber = messages.filter((message) => message.role === 'user').length;
     const events: Array<{ role: 'user' | 'assistant'; content: string }> = [];
     if (userMessage?.role === 'user' && typeof userMessage.content === 'string' && userMessage.content.trim()) {
       events.push({ role: 'user', content: userMessage.content });
@@ -254,6 +255,8 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
           batchId,
           anonymousVisitorId,
           anonymousConversationId,
+          conversationId: anonymousConversationId,
+          turnNumber,
         },
       });
     }
@@ -538,6 +541,18 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
     const nextValue = (liveValue || draftInput).trim();
     if (!nextValue) return;
 
+    void trackEvent({
+      eventName: 'chat_message_sent',
+      page: '/chat',
+      status: 'success',
+      metadata: {
+        conversationId: currentConversationId,
+        turnNumber: messages.filter((message) => message.role === 'user').length + 1,
+        messageChars: nextValue.length,
+        isAnonymous: !currentConversationId,
+      },
+    });
+
     setDraftInput('');
     if (textareaRef.current) {
       textareaRef.current.value = '';
@@ -556,7 +571,7 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
       }
       throw error;
     }
-  }, [append, draftInput, isLoading]);
+  }, [append, currentConversationId, draftInput, isLoading, messages]);
 
   const handleNewChat = async () => {
     const materialMessages = getReportMaterialMessages(messages);
@@ -755,7 +770,7 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
     });
   }, []);
 
-  const persistReportAndOpen = useCallback((reportData: CareerReportPayload, source: 'model' | 'fallback') => {
+  const persistReportAndOpen = useCallback(async (reportData: CareerReportPayload, source: 'model' | 'fallback') => {
     try {
       window.localStorage.setItem(REPORT_STORAGE_KEY, JSON.stringify(reportData));
       window.localStorage.setItem(CAREER_PROFILE_SUMMARY_KEY, JSON.stringify(buildCareerProfileSummary(
@@ -764,7 +779,7 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
       saveGeneratedCareerSample(reportData, profileMaterialMessages as Array<{ id?: string; role: string; content: string }>);
       const draftToken = getOrCreateCareerDraftToken();
       if (draftToken) {
-        void fetch('/api/career-path/draft', {
+        const draftResponse = await fetch('/api/career-path/draft', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -772,10 +787,15 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
             report: reportData,
             messages: profileMaterialMessages,
           }),
-        }).catch((error) => console.error('Failed to save career draft', error));
+        });
+        if (!draftResponse.ok) {
+          throw new Error('职业资料暂时无法保存，请稍后重新生成报告。');
+        }
       }
     } catch (e) {
       console.error(`Failed to persist ${source} report`, e);
+      setReportError(e instanceof Error ? e.message : '职业资料暂时无法保存，请稍后重试。');
+      return;
     }
     router.push('/report');
   }, [profileMaterialMessages, router]);
@@ -842,7 +862,7 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
           step: 'report_generation',
           status: 'fallback',
         });
-        persistReportAndOpen(buildFallbackCareerReport(materialForReport), 'fallback');
+        void persistReportAndOpen(buildFallbackCareerReport(materialForReport), 'fallback');
       }, REPORT_GENERATION_STUCK_FALLBACK_MS);
 
       const response = await fetch('/api/report', {
@@ -871,7 +891,17 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
         step: 'report_generation',
         status: 'success',
       });
-      persistReportAndOpen({ ...data, generated_by: 'model' }, 'model');
+      void trackEvent({
+        eventName: 'report_generation_success',
+        page: '/chat',
+        status: 'success',
+        metadata: {
+          conversationId: currentConversationId,
+          turnNumber: materialUserMessageCount,
+          reportSource: 'model',
+        },
+      });
+      void persistReportAndOpen({ ...data, generated_by: 'model' }, 'model');
     } catch (error) {
       settled = true;
       clearInterval(intervalId);
@@ -881,14 +911,26 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
       setLoadingStep('');
       reportAbortControllerRef.current = null;
       console.error('Failed to generate report:', error);
-      void trackEvent({
-        eventName: 'flow_step',
+        void trackEvent({
+          eventName: 'flow_step',
         page: '/chat',
         step: 'report_generation',
         status: 'fallback',
       });
+      void trackEvent({
+        eventName: 'report_generation_failed',
+        page: '/chat',
+        status: 'error',
+        metadata: { conversationId: currentConversationId, turnNumber: materialUserMessageCount, reason: 'fallback' },
+      });
+        void trackEvent({
+          eventName: 'report_generation_success',
+          page: '/chat',
+          status: 'fallback',
+          metadata: { conversationId: currentConversationId, turnNumber: materialUserMessageCount, reportSource: 'fallback' },
+        });
       if (!hasOpenedFallback) {
-        persistReportAndOpen(buildFallbackCareerReport(materialForReport), 'fallback');
+        void persistReportAndOpen(buildFallbackCareerReport(materialForReport), 'fallback');
       }
       setIsGeneratingReport(false);
     }
@@ -913,7 +955,7 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
             <div className="flex items-center gap-3">
               <div className="flex flex-col">
                 <h1 className="text-lg font-medium tracking-tight text-foreground/80">EchoTalent</h1>
-                <span className="text-[10px] text-muted-foreground tracking-widest uppercase opacity-70">v4.5.3</span>
+                <span className="text-[10px] text-muted-foreground tracking-widest uppercase opacity-70">v4.5.5</span>
               </div>
             </div>
             <div className="flex items-center gap-1.5 sm:gap-2">

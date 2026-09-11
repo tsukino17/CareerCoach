@@ -99,7 +99,7 @@ export function CareerPathPreviewCard({
           </p>
         </div>
         <Button onClick={onOpen} className="rounded-full bg-white px-6 text-slate-900 shadow-lg shadow-slate-950/10 hover:bg-slate-100">
-          查看我的路径预览
+          查看我的路径地图
         </Button>
       </div>
     </section>

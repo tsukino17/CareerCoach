@@ -25,9 +25,7 @@ export default function RootLayout({
   return (
     <html lang="zh-CN" suppressHydrationWarning>
       <body
-        className={cn(
-          "antialiased min-h-screen bg-background text-foreground"
-        )}
+        className={cn("antialiased min-h-screen bg-background text-foreground")}
         suppressHydrationWarning
       >
         <AnalyticsPageViewTracker />

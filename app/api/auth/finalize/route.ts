@@ -101,24 +101,6 @@ export async function POST(request: Request) {
       user_agent: request.headers.get('user-agent') || null,
     });
 
-    if (draftToken) {
-      const { data: draft } = await supabaseAdmin
-        .from('anonymous_career_drafts')
-        .select('id, claimed_by_user_id')
-        .eq('draft_token', draftToken)
-        .maybeSingle();
-
-      if (draft && !draft.claimed_by_user_id) {
-        await supabaseAdmin
-          .from('anonymous_career_drafts')
-          .update({
-            claimed_by_user_id: user.id,
-            claimed_at: now,
-          })
-          .eq('id', draft.id);
-      }
-    }
-
     return NextResponse.json({ ok: true, userId: user.id });
   } catch (error) {
     console.error('Finalize auth failed', error);
