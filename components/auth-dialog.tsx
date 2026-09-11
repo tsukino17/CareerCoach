@@ -26,6 +26,8 @@ export function AuthDialog({ isOpen, onClose, onAuthSuccess, nextPath, draftToke
   const [mode, setMode] = useState<'sign_in' | 'sign_up'>('sign_in');
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [trainingConsent, setTrainingConsent] = useState(false);
+  const [resetMode, setResetMode] = useState(false);
+  const [resending, setResending] = useState(false);
 
   const claimCareerDraft = async (accessToken: string) => {
     if (!draftToken) return true;
@@ -133,6 +135,26 @@ export function AuthDialog({ isOpen, onClose, onAuthSuccess, nextPath, draftToke
 
   if (!isOpen) return null;
 
+  const handleResendConfirmation = async () => {
+    if (!email) return;
+    setResending(true);
+    try {
+      const { error: resendError } = await supabase.auth.resend({
+        type: 'signup',
+        email: email.trim(),
+        options: { emailRedirectTo: buildCallbackUrl() },
+      });
+      if (resendError) throw resendError;
+      setError(null);
+      setSuccessMessage('验证邮件已重新发送，请检查收件箱或垃圾邮件。');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : '重发失败，请稍后重试。';
+      setError(message);
+    } finally {
+      setResending(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -140,6 +162,14 @@ export function AuthDialog({ isOpen, onClose, onAuthSuccess, nextPath, draftToke
     setSuccessMessage(null);
 
     try {
+      if (resetMode) {
+        const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: `${window.location.origin}/auth/reset`,
+        });
+        if (resetError) throw resetError;
+        setSuccessMessage('重置邮件已发送，请检查邮箱；如果没有收到，请查看垃圾邮件。');
+        return;
+      }
       // 1. Try to Sign In first
       const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
         email,
@@ -152,6 +182,19 @@ export function AuthDialog({ isOpen, onClose, onAuthSuccess, nextPath, draftToke
       }
 
       if (mode === 'sign_in') {
+        // Check if the user exists but sign-in failed — could be wrong password or unconfirmed email
+        const { data: checkData, error: checkError } = await supabase.auth.signUp({
+          email,
+          password: 'placeholder_check_only',
+          options: { emailRedirectTo: buildCallbackUrl() },
+        });
+        if (checkError?.message.includes('already registered')) {
+          throw new Error('密码似乎不正确。如果确认密码没错，可能邮箱还没有确认 — 请检查收件箱或垃圾邮件。');
+        }
+        if (checkData?.user) {
+          // signUp returned a user — this email hadn't been registered at all, which is odd but means truly wrong credentials
+          throw new Error('邮箱或密码不正确。若忘记密码，请重新获取登录邮件。');
+        }
         throw new Error('邮箱或密码不正确。若忘记密码，请重新获取登录邮件。');
       }
 
@@ -241,14 +284,14 @@ export function AuthDialog({ isOpen, onClose, onAuthSuccess, nextPath, draftToke
         <div className="mb-5 grid grid-cols-2 rounded-xl bg-slate-100 p-1 text-sm font-medium">
           <button
             type="button"
-            onClick={() => { setMode('sign_in'); setError(null); setSuccessMessage(null); }}
+            onClick={() => { setMode('sign_in'); setResetMode(false); setError(null); setSuccessMessage(null); }}
             className={mode === 'sign_in' ? 'rounded-lg bg-white px-3 py-2 text-slate-900 shadow-sm' : 'rounded-lg px-3 py-2 text-slate-500'}
           >
             登录
           </button>
           <button
             type="button"
-            onClick={() => { setMode('sign_up'); setError(null); setSuccessMessage(null); }}
+            onClick={() => { setMode('sign_up'); setResetMode(false); setError(null); setSuccessMessage(null); }}
             className={mode === 'sign_up' ? 'rounded-lg bg-white px-3 py-2 text-slate-900 shadow-sm' : 'rounded-lg px-3 py-2 text-slate-500'}
           >
             注册
@@ -271,7 +314,7 @@ export function AuthDialog({ isOpen, onClose, onAuthSuccess, nextPath, draftToke
             </div>
           </div>
 
-          {mode === 'sign_up' ? (
+          {mode === 'sign_up' && !resetMode ? (
             <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600">
               <label className="flex cursor-pointer items-start gap-2">
                 <input type="checkbox" checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} className="mt-1" />
@@ -279,12 +322,12 @@ export function AuthDialog({ isOpen, onClose, onAuthSuccess, nextPath, draftToke
               </label>
               <label className="flex cursor-pointer items-start gap-2">
                 <input type="checkbox" checked={trainingConsent} onChange={(event) => setTrainingConsent(event.target.checked)} className="mt-1" />
-                <span>我同意将去标识化对话数据用于产品与模型改进（可选，之后可在个人资料中修改）。</span>
+                <span>我同意将去标识化对话数据用于产品与模型改进。</span>
               </label>
             </div>
           ) : null}
 
-          <div className="space-y-2">
+          {!resetMode ? <div className="space-y-2">
             <label className="text-sm font-medium text-gray-700 ml-1">密码</label>
             <div className="relative">
               <Lock className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
@@ -298,11 +341,22 @@ export function AuthDialog({ isOpen, onClose, onAuthSuccess, nextPath, draftToke
                 minLength={6}
               />
             </div>
-          </div>
+          </div> : null}
 
           {error && (
             <div className="p-3 text-sm text-red-500 bg-red-50 rounded-lg border border-red-100">
               {error}
+              {error.includes('邮箱还没有确认') && (
+                <button
+                  type="button"
+                  onClick={handleResendConfirmation}
+                  disabled={resending}
+                  className="mt-2 w-full rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-medium text-sky-700 hover:bg-sky-100 transition-colors flex items-center justify-center gap-1.5"
+                >
+                  {resending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                  重新发送验证邮件
+                </button>
+              )}
             </div>
           )}
 
@@ -320,13 +374,26 @@ export function AuthDialog({ isOpen, onClose, onAuthSuccess, nextPath, draftToke
             {loading ? (
               <Loader2 className="w-5 h-5 animate-spin mr-2" />
             ) : null}
-            {mode === 'sign_in' ? '登录' : '创建账号并发送验证邮件'}
+            {resetMode ? '发送重置邮件' : mode === 'sign_in' ? '登录' : '创建账号并发送验证邮件'}
           </Button>
         </form>
 
-        <p className="mt-6 text-center text-xs text-gray-400">
-          {mode === 'sign_in' ? '忘记密码或验证链接过期？可重新获取登录邮件。' : '注册后需要通过邮箱验证才能保存职业资料。'}
-        </p>
+        {mode === 'sign_in' && !resetMode ? (
+          <button type="button" onClick={() => { setResetMode(true); setError(null); setSuccessMessage(null); }} className="mt-4 w-full text-center text-xs text-sky-700 hover:underline">
+            忘记密码？发送重置邮件
+          </button>
+        ) : null}
+        {resetMode ? (
+          <button type="button" onClick={() => { setResetMode(false); setError(null); setSuccessMessage(null); }} className="mt-4 w-full text-center text-xs text-slate-500 hover:underline">
+            返回登录
+          </button>
+        ) : null}
+
+        {mode === 'sign_up' ? (
+          <p className="mt-6 text-center text-xs text-gray-400">
+            注册后需要通过邮箱验证才能保存职业资料。
+          </p>
+        ) : null}
       </div>
     </div>
   );

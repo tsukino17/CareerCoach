@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { MessageSquare, Trash2, Calendar, FileText, LogOut, User, ChevronLeft, Loader2, Download, Plus } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { MessageSquare, Trash2, Calendar, FileText, LogOut, User, ChevronLeft, Loader2, Download, Plus, Clock, Heart } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabase';
 import { AuthDialog } from '@/components/auth-dialog';
@@ -23,9 +23,17 @@ export default function UserCenterPage() {
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<SupabaseUser | null>(null);
-  const [activeTab, setActiveTab] = useState<'history' | 'reports' | 'plan'>('history');
+  const [activeTab, setActiveTab] = useState<'history' | 'reports' | 'plan' | 'donate'>('history');
   const [showAuth, setShowAuth] = useState(false);
   const [localReport, setLocalReport] = useState<unknown | null>(null);
+
+  const registrationDays = useMemo(() => {
+    if (!user?.created_at) return null;
+    const created = new Date(user.created_at);
+    const now = new Date();
+    const diffMs = now.getTime() - created.getTime();
+    return Math.max(1, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+  }, [user?.created_at]);
   
   const router = useRouter();
 
@@ -251,6 +259,12 @@ export default function UserCenterPage() {
                 <p className="text-sm text-muted-foreground mt-1">
                     {user ? '已登录 EchoTalent Cloud' : '未登录'}
                 </p>
+                {user && registrationDays !== null && (
+                  <p className="text-xs text-muted-foreground/70 mt-1 flex items-center justify-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    天赋教练已陪伴你{registrationDays}天
+                  </p>
+                )}
                 {user ? (
                     <>
                         <Button 
@@ -305,6 +319,14 @@ export default function UserCenterPage() {
                     <Calendar className="w-4 h-4 shrink-0" />
                     行动计划
                 </Button>
+                <Button 
+                    variant={activeTab === 'donate' ? "secondary" : "ghost"} 
+                    className="justify-start gap-3 flex-1 md:flex-none whitespace-nowrap px-3"
+                    onClick={() => setActiveTab('donate')}
+                >
+                    <Heart className="w-4 h-4 shrink-0" />
+                    支持我们
+                </Button>
             </div>
         </div>
 
@@ -314,6 +336,7 @@ export default function UserCenterPage() {
                 {activeTab === 'history' && '历史对话'}
                 {activeTab === 'reports' && '职业报告'}
                 {activeTab === 'plan' && '行动计划'}
+                {activeTab === 'donate' && '支持我们'}
             </h2>
 
             {activeTab === 'history' && (
@@ -411,6 +434,37 @@ export default function UserCenterPage() {
                     <p>你的职业行动计划将显示在这里</p>
                     <Button variant="outline" onClick={() => router.push('/chat')}>回到对话</Button>
                     </div>
+            )}
+
+            {activeTab === 'donate' && (
+                <div className="flex flex-col items-center py-8 gap-6">
+                    <div className="max-w-md text-center space-y-4">
+                        <Heart className="w-10 h-10 mx-auto text-rose-400" />
+                        <h3 className="text-lg font-semibold text-foreground">如果这里对你有用</h3>
+                        <p className="text-sm text-muted-foreground leading-7">
+                            EchoTalent 还在很早期的阶段，没有广告、没有融资、没有团队，只有一个人和一只 AI 在慢慢做。
+                        </p>
+                        <p className="text-sm text-muted-foreground leading-7">
+                            每一次对话、每一份报告、每一条现实路径，都是真实地在帮某个人看清自己、往前走一步。
+                            如果你在这里找到过一点方向、一点勇气、或者只是被认真倾听过一次——
+                            你的支持会让它走得更远、做得更稳，也让更多还在路上的人有机会遇见它。
+                        </p>
+                        <p className="text-sm text-muted-foreground leading-7">
+                            金额不重要，哪怕只是一杯咖啡的钱，也是一份真诚的鼓励。
+                        </p>
+                    </div>
+                    <div className="rounded-2xl border border-border/60 bg-card p-6 shadow-sm">
+                        <p className="text-xs text-muted-foreground text-center mb-3">微信扫码，随意打赏</p>
+                        <img
+                            src="/donate-wechat.png"
+                            alt="微信收款码"
+                            className="w-48 h-48 object-contain rounded-lg"
+                        />
+                    </div>
+                    <p className="text-xs text-muted-foreground/50 text-center max-w-xs">
+                        每一份支持都将用于服务器与模型调用，让陪伴持续发生。
+                    </p>
+                </div>
             )}
         </div>
       </div>

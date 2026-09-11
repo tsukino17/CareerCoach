@@ -142,6 +142,21 @@ async function buildPeriodicReport(supabase: SupabaseClient, now: Date, cadence:
   ]);
   const allProfiles = (allProfilesData || []) as Array<{ user_id: string }>;
   const authUsers = authUsersData?.users || [];
+
+  // All-time unique visitors: distinct user_id + anonymousVisitorId + session_id
+  const { data: allTimeVisitorsData, error: allTimeVisitorsError } = await supabase
+    .from('analytics_events')
+    .select('user_id,session_id,metadata')
+    .limit(100000);
+  let totalVisitors = 0;
+  if (!allTimeVisitorsError && allTimeVisitorsData) {
+    const visitorSet = new Set<string>();
+    for (const row of allTimeVisitorsData as Array<{ user_id: string | null; session_id: string | null; metadata: Record<string, unknown> | null }>) {
+      const key = row.user_id || (typeof row.metadata?.anonymousVisitorId === 'string' ? row.metadata.anonymousVisitorId : null) || row.session_id;
+      if (key) visitorSet.add(key);
+    }
+    totalVisitors = visitorSet.size;
+  }
   const pageViews = events.filter((event) => event.event_name === 'page_view');
   const humanPageViews = pageViews.filter((event) => !isBotUserAgent(event.user_agent || ''));
   const botPageViews = pageViews.filter((event) => isBotUserAgent(event.user_agent || ''));
@@ -226,6 +241,7 @@ async function buildPeriodicReport(supabase: SupabaseClient, now: Date, cadence:
       registeredUsers: authUsers.length,
       verifiedUsers: authUsers.filter((user) => Boolean(user.email_confirmed_at)).length,
       initializedUsers: allProfiles.length,
+      totalVisitors,
       engagedPages: humanEngagements.length,
       avgEngagement: humanEngagements.length ? formatDuration(duration / humanEngagements.length) : '0秒',
       messages: messages.length + anonymousMessages.length,
@@ -259,7 +275,7 @@ async function buildPeriodicReport(supabase: SupabaseClient, now: Date, cadence:
       repeatMeaningfulRate: visitorDays.size ? Number(((repeatMeaningfulUsers / visitorDays.size) * 100).toFixed(1)) : 0,
       activeDayBuckets,
     },
-    setupWarnings: [profileError && 'user_profiles 查询失败，新增注册数可能不完整。', allProfilesError && 'user_profiles 总数查询失败。', authUsersError && '认证用户查询失败，总注册数可能不完整。', messageError && 'messages 查询失败，对话数可能不完整。'].filter(Boolean),
+    setupWarnings: [profileError && 'user_profiles 查询失败，新增注册数可能不完整。', allProfilesError && 'user_profiles 总数查询失败。', authUsersError && '认证用户查询失败，总注册数可能不完整。', messageError && 'messages 查询失败，对话数可能不完整。', allTimeVisitorsError && 'analytics_events 历史查询失败，总访客数可能不完整。'].filter(Boolean),
   };
   return report;
 }
@@ -276,7 +292,7 @@ function buildInsights(report: WeeklyReport): string[] {
   const { totals, daily, topPages, retention, sources, cities, bots } = report;
   const insights: string[] = [];
   const perCapita = totals.uv ? (totals.pv / totals.uv).toFixed(1) : '—';
-  insights.push(`本周共 ${totals.pv} 次访问、${totals.uv} 位访客，人均浏览 ${perCapita} 页，平均有效停留 ${totals.avgEngagement}。`);
+  insights.push(`本周共 ${totals.pv} 次访问、${totals.uv} 位访客，人均浏览 ${perCapita} 页，平均有效停留 ${totals.avgEngagement}。全站历史累计访客 ${totals.totalVisitors} 人，累计注册 ${totals.registeredUsers} 人。`);
   if (bots.pv > 0) {
     const botTypes = bots.types.slice(0, 3).map((item) => item.name).join('、');
     insights.push(`另有 ${bots.pv} 次爬虫访问${botTypes ? `（${botTypes}等）` : ''}已剔除，不参与上方真实访客指标。`);
@@ -382,6 +398,7 @@ export function renderWeeklyReportText(report: Awaited<ReturnType<typeof buildWe
     `访问：PV ${totals.pv}，UV ${totals.uv}，平均有效停留 ${totals.avgEngagement}`,
     `爬虫：${report.bots.pv} 次访问 / ${report.bots.uv} 访客（${report.bots.types.map((item) => `${item.name} ${item.count}`).join('，') || '无'}）`,
     `用户：注册账号 ${totals.registeredUsers}，已验证 ${totals.verifiedUsers}，已初始化资料 ${totals.initializedUsers}（本周新增 ${totals.registrations}）`,
+    `全部：历史累计访客 ${totals.totalVisitors} 人，累计注册 ${totals.registeredUsers} 人`,
     `使用：对话 ${totals.conversations}，用户消息 ${totals.userMessages}`,
     '',
     '每日访问：',
@@ -433,8 +450,8 @@ export function renderWeeklyReportHtml(report: WeeklyReport, title = '网站周�
       <div style="font-size:12px;color:#64748b;margin-top:4px;">${label}</div>
     </td>`;
 
-  const kpiPrimary = [kpiCell(String(totals.pv), '总访问 PV'), kpiCell(String(totals.uv), '访客 UV'), kpiCell(perCapita, '人均浏览页数'), kpiCell(totals.avgEngagement, '平均有效停留')].join('');
-  const kpiSecondary = [kpiCell(String(totals.registrations), '本周新增注册'), kpiCell(String(totals.registeredUsers), '累计注册'), kpiCell(String(totals.conversations), '对话数'), kpiCell(`${retention.repeatVisitorRate}%`, '回访率')].join('');
+  const kpiPrimary = [kpiCell(String(totals.pv), '总访问 PV'), kpiCell(String(totals.uv), '访客 UV'), kpiCell(String(totals.totalVisitors), '历史累计访客'), kpiCell(String(totals.registeredUsers), '累计注册')].join('');
+  const kpiSecondary = [kpiCell(String(totals.registrations), '本周新增注册'), kpiCell(perCapita, '人均浏览页数'), kpiCell(totals.avgEngagement, '平均有效停留'), kpiCell(`${retention.repeatVisitorRate}%`, '回访率')].join('');
 
   const insightList = `<ul style="margin:0;padding-left:18px;color:#334155;font-size:13px;line-height:1.8;">${insights.map((item) => `<li style="margin-bottom:6px;">${escHtml(item)}</li>`).join('')}</ul>`;
 
