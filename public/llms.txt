@@ -1,0 +1,17 @@
+# Echo Talent (天赋回声)
+> AI 驱动的职业规划与转型助手，帮你发现隐藏的职业优势与可迁移能力。
+
+## 核心页面
+- [首页](https://echotalent.fun): AI 职业规划入口，支持对话式职业探索。
+- [AI 对话](https://echotalent.fun/chat): 与 AI 职业教练深度对话，获取个性化职业建议。
+- [职业路径](https://echotalent.fun/path): 浏览已生成的职业路径案例，了解可能的方向。
+- [职业报告](https://echotalent.fun/report): AI 生成的个人职业分析报告。
+
+## 功能说明
+- **天赋回声**: 通过 AI 对话分析你的过往经历，提取隐藏的天赋和可迁移能力。
+- **现实路径**: 将现有能力映射到目标岗位，生成从当前到目标的可行路径。
+- **职业探索**: 搜索和分析目标职业方向，帮助做出明智的职业决策。
+
+## 可选更多
+- [隐私政策](https://echotalent.fun/legal/privacy-policy)
+- [Sitemap](https://echotalent.fun/sitemap.xml)
