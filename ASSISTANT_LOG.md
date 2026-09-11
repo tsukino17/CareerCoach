@@ -1,5 +1,12 @@
 # AI 助手合作日志
 
+## 2026-09-11（周报可视化、爬虫过滤与渠道增强）
+
+- 周报 HTML 版重构：新增 KPI 卡片、每日访问折线图（SVG）、数据表格，以及根据 PV/UV/注册/回访/来源/地域自动生成的「运营洞察」段落；纯文本版同步增加洞察摘要。
+- 爬虫过滤：按 User-Agent 识别 bot（Googlebot/Bingbot/AI 爬虫/HeadlessChrome/Baiduspider 等），真实访客指标与分布（城市/来源/设备/浏览器/留存）只统计真人，爬虫单独归入「爬虫访问（已剔除）」并列出类型。
+- 渠道增强：前端埋点从单一 `utm_source` 扩展为 `trafficSource`（具体来源域名）+ `trafficMedium`（search/social/referral/direct）+ `trafficCampaign`（utm_campaign），周报新增「渠道类型」「营销活动」两个分组。
+- 说明：以上仅改代码，尚未部署；周报邮件要生效需合并到生产分支并触发 Vercel 重新部署。
+
 ## 2026-08-29（设备与城市统计）
 
 - 周报/月报新增设备型号和操作系统聚合，并保留城市统计。型号仅从浏览器 User-Agent 提取；对 iPhone/iPad 和大多数桌面电脑不公开的型号明确标记为“具体型号未公开”，不做推断。
