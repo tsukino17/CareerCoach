@@ -29,6 +29,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/lib/supabase';
+import { authHeaders } from '@/lib/api-auth';
 import { AuthDialog } from '@/components/auth-dialog';
 import {
   buildCareerProfileSummary,
@@ -2158,7 +2159,7 @@ export default function PathPage() {
     try {
       const res = await fetch('/api/coach/path/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
         body: JSON.stringify({ messages: nextMessages, report, preview, tasks: nextTasks }),
       });
       const data = (await res.json()) as { reply?: string };

@@ -2,7 +2,7 @@
 
 > 从一次真诚的对话开始，理解你的职业优势，并把它转化为可以验证的现实路径。
 
-当前版本：**v4.5.5**
+当前版本：**v4.6.6**
 
 官网：[echotalent.fun](https://echotalent.fun)
 
@@ -80,7 +80,20 @@ EchoTalent 是一个 AI 职业探索产品。它不只给出一份静态测评�
 
 ![现实路径地图](docs/screenshots/03-path.png)
 
-## 最新版本 · v4.5.5
+## 最新版本 · v4.6.6
+
+### 模型网关与用量统计 (Model Gateway & Metering)
+
+- 接入 TokenDance 多模型网关：11 条 LLM 路由统一走 `lib/tokendance.ts`，密钥优先 `TOKENDANCE_API_KEY`，未配置时回落 DashScope 兼容模式；语音转写/TTS 与 Gemini/DeepSeek 备选通道保持原样。
+- 全量 AI 调用按用户记账：新增 `ai_usage_events` 表（登录用户按 user_id、匿名按 IP），覆盖教练对话、报告、计划、角色分析等全部模型路由；记账失败静默不影响主流程。
+- 个人中心新增「AI 用量」卡片：本月 Token/调用次数、累计 Token 与分路由明细，数据来自新增的 `/api/usage/me` 接口。
+- 为后续按用量计费与邀请注册赠送额度预留数据基础。
+
+### 近期更新（v4.5.5 之后随版本发布）
+
+- 周报升级：统计上一自然周、支持多收件人、可视化与爬虫过滤、渠道归因和累计访客统计。
+- SEO 第一阶段：robots、sitemap、结构化数据与 `llms.txt`。
+- 注册体验：邮箱确认提示优化、显示注册天数；新增捐赠板块。
 
 ### Auth & Career Path
 

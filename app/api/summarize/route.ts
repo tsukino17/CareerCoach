@@ -1,6 +1,7 @@
 
-import { createOpenAI } from '@ai-sdk/openai';
 import { generateText } from 'ai';
+import { createLlmClient } from '@/lib/tokendance';
+import { recordAiUsage } from '@/lib/token-usage';
 
 export const runtime = 'edge';
 export const maxDuration = 30;
@@ -16,10 +17,13 @@ export async function POST(req: Request) {
       });
     }
 
-    const openai = createOpenAI({
-      baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-      apiKey: process.env.DASHSCOPE_API_KEY,
-    });
+    const llm = createLlmClient();
+    if (!llm) {
+      return new Response(JSON.stringify({ error: 'Missing model API key' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
 
     // Take the first few messages for summary
     const context = messages
@@ -32,8 +36,8 @@ export async function POST(req: Request) {
       })
       .join('\n');
 
-    const { text } = await generateText({
-      model: openai('qwen-plus'),
+    const { text, usage } = await generateText({
+      model: llm.openai(llm.chatModel),
       system: `
         你是一个专业的对话总结助手。
         任务：根据用户的对话内容，生成一个简短、精准的标题。
@@ -45,6 +49,7 @@ export async function POST(req: Request) {
       `,
       prompt: `对话内容：\n${context}\n\n请生成标题：`,
     });
+    await recordAiUsage({ req, route: 'summarize', model: llm.chatModel, usage });
 
     return new Response(JSON.stringify({ title: text.trim() }), {
       status: 200,

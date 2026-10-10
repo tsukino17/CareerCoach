@@ -30,3 +30,4 @@ ts-debug.log*
 
 # typescript
 *.tsbuildinfo
+.weekly-report-latest.txt

@@ -1,7 +1,8 @@
-import { createOpenAI } from '@ai-sdk/openai';
 import { generateObject } from 'ai';
 import { z } from 'zod';
 import { sanitizeResponseContent } from '@/lib/utils';
+import { createLlmClient } from '@/lib/tokendance';
+import { recordAiUsage } from '@/lib/token-usage';
 
 export const runtime = 'edge';
 export const maxDuration = 60;
@@ -60,10 +61,13 @@ export async function POST(req: Request) {
     // Log the incoming data for debugging
     console.log('Generating plan for archetype:', report?.archetype);
 
-    const openai = createOpenAI({
-      baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-      apiKey: process.env.DASHSCOPE_API_KEY,
-    });
+    const llm = createLlmClient();
+    if (!llm) {
+      return new Response(JSON.stringify({ error: 'Missing model API key' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
 
     // Injecting more report context into the system prompt to ensure consistency
     const systemPrompt = `
@@ -94,8 +98,8 @@ export async function POST(req: Request) {
     - **Quotes**: STRICTLY FORBIDDEN to use single quotes (''). MUST use Chinese double quotes (“”) for any quoted text or emphasis.
     `;
 
-    const { object } = await generateObject({
-      model: openai('qwen-plus'),
+    const { object, usage } = await generateObject({
+      model: llm.openai(llm.chatModel),
       schema: planSchema,
       system: systemPrompt,
       messages: [
@@ -104,6 +108,7 @@ export async function POST(req: Request) {
       ],
       mode: 'json',
     });
+    await recordAiUsage({ req, route: 'plan', model: llm.chatModel, usage });
 
     const sanitizedObject = sanitizeResponseContent(object);
 

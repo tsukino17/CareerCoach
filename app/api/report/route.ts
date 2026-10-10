@@ -1,10 +1,11 @@
-import { createOpenAI } from '@ai-sdk/openai';
 import { generateObject } from 'ai';
 import { z } from 'zod';
 import { sanitizeResponseContent } from '@/lib/utils';
 import { GENTLE_BREEZE_V4_REPORT_PROMPT } from '@/lib/prompt-versions';
 import { checkRateLimitDistributed, getClientIp, normalizeMessages, rateLimitResponse } from '@/lib/rate-limit';
 import { filterCareerProfileMaterialMessages } from '@/lib/career-path';
+import { createLlmClient } from '@/lib/tokendance';
+import { recordAiUsage } from '@/lib/token-usage';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -57,27 +58,24 @@ export async function POST(req: Request) {
         headers: { 'Content-Type': 'application/json' },
       });
     }
-    if (!process.env.DASHSCOPE_API_KEY) {
+    const llm = createLlmClient();
+    if (!llm) {
       return new Response(JSON.stringify({ error: 'Missing model API key' }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' },
       });
     }
 
-    const openai = createOpenAI({
-      baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-      apiKey: process.env.DASHSCOPE_API_KEY,
-    });
-
     const systemPrompt = GENTLE_BREEZE_V4_REPORT_PROMPT;
 
-    const { object } = await generateObject({
-      model: openai('qwen-plus'),
+    const { object, usage } = await generateObject({
+      model: llm.openai(llm.chatModel),
       schema: reportSchema,
       system: systemPrompt,
       messages: chatMessages,
       mode: 'json',
     });
+    await recordAiUsage({ req, route: 'report', model: llm.chatModel, usage });
     const modelFinishedAt = Date.now();
 
     const sanitizedObject = sanitizeResponseContent(object);

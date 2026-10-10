@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { buildRealityPathCoachPrompt, type RealityPathCoachPromptInput } from '@/lib/path-coach-prompt';
 import { checkRateLimitDistributed, getClientIp, normalizeMessages, type ApiMessage } from '@/lib/rate-limit';
+import { llmChatCompletion } from '@/lib/tokendance';
+import { recordAiUsage } from '@/lib/token-usage';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -9,29 +11,15 @@ type PathChatBody = RealityPathCoachPromptInput & {
   messages?: unknown;
 };
 
-async function requestQwen(messages: ApiMessage[], systemPrompt: string) {
-  const apiKey = process.env.DASHSCOPE_API_KEY;
-  if (!apiKey) throw new Error('Missing DashScope API key');
-
-  const response = await fetch('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: 'qwen-plus',
-      messages: [{ role: 'system', content: systemPrompt }, ...messages],
-      temperature: 0.62,
-      max_tokens: 700,
-    }),
+async function requestQwen(req: Request, messages: ApiMessage[], systemPrompt: string) {
+  const { content, model, usage } = await llmChatCompletion({
+    messages: [{ role: 'system', content: systemPrompt }, ...messages],
+    temperature: 0.62,
+    maxTokens: 700,
   });
-
-  const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } };
-  if (!response.ok) throw new Error(data.error?.message || 'Qwen request failed');
-  const content = data.choices?.[0]?.message?.content?.trim();
-  if (!content) throw new Error('Qwen returned empty content');
-  return content;
+  await recordAiUsage({ req, route: 'coach/path/chat', model, usage });
+  if (!content.trim()) throw new Error('LLM returned empty content');
+  return content.trim();
 }
 
 export async function POST(req: Request) {
@@ -49,7 +37,7 @@ export async function POST(req: Request) {
       maxContentLength: 1200,
       allowSystem: false,
     });
-    const reply = await requestQwen(messages, buildRealityPathCoachPrompt(body));
+    const reply = await requestQwen(req, messages, buildRealityPathCoachPrompt(body));
     return NextResponse.json({ reply, provider: 'qwen' });
   } catch (error) {
     console.error('[path-coach] qwen request failed', error);

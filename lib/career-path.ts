@@ -182,6 +182,9 @@ export type PathDirectionCluster = {
   name: string;
   tagline: string;
   fit_reason: string;
+  evidence: string[];
+  uncertainty: string;
+  first_action: string;
   strengths: string[];
   sample_roles: string[];
 };
@@ -189,6 +192,12 @@ export type PathDirectionCluster = {
 export type PathMapPreview = {
   headline: string;
   introduction: string;
+  evidence_summary: string;
+  work_profile: {
+    preferred_problems: string;
+    work_style: string;
+    value_for: string;
+  };
   direction_clusters: PathDirectionCluster[];
   market_insight_prompts: string[];
   preparation_focuses: string[];
@@ -198,7 +207,9 @@ type DirectionDefinition = {
   id: string;
   name: string;
   tagline: string;
-  fit_reason: string;
+  preferred_problems: string;
+  work_style: string;
+  value_for: string;
   strengths: string[];
   sample_roles: string[];
   keywords: string[];
@@ -206,48 +217,69 @@ type DirectionDefinition = {
 
 const DIRECTION_LIBRARY: DirectionDefinition[] = [
   {
-    id: 'insight-strategy',
-    name: '洞察与策略型',
-    tagline: '适合把复杂信息整理成判断与方向的人。',
-    fit_reason: '你更容易在理解人、提炼问题、形成判断的工作里发挥稳定优势。',
+    id: 'research-insight-strategy',
+    name: '研究洞察与策略方向',
+    tagline: '理解用户与市场，把复杂信息转化为判断。',
+    preferred_problems: '从复杂信息和真实需求中找到关键问题',
+    work_style: '深度观察、分析归纳，再形成清晰判断',
+    value_for: '为用户、产品团队和决策者提供更可靠的方向',
     strengths: ['洞察', '整合', '抽象思考'],
     sample_roles: ['用户研究', '内容策略', '战略分析'],
     keywords: ['洞察', '分析', '策略', '研究', '抽象', '逻辑', '判断', '咨询', '规划'],
   },
   {
-    id: 'coordination-execution',
-    name: '复杂协同推进型',
-    tagline: '适合推动多人协作、把事情落地成结果的人。',
-    fit_reason: '你在跨方沟通、任务推进和把模糊目标拆成路径这类场景里会更有掌控感。',
+    id: 'product-experience-optimization',
+    name: '用户体验与产品优化方向',
+    tagline: '发现体验问题，推动产品和服务变得更好用。',
+    preferred_problems: '找到用户体验中的阻碍，并把模糊问题变成改进方案',
+    work_style: '结合用户反馈、细节观察和跨角色协作持续迭代',
+    value_for: '为真实用户创造更顺畅、清晰和可信赖的体验',
+    strengths: ['用户理解', '体验判断', '持续优化'],
+    sample_roles: ['用户体验优化', '产品经理', '服务设计'],
+    keywords: ['用户', '体验', '产品', '交互', '设计', '反馈', '可用性', '优化', '细节'],
+  },
+  {
+    id: 'project-operations-delivery',
+    name: '项目协同与运营推进方向',
+    tagline: '协调资源和节奏，把目标稳定推进到结果。',
+    preferred_problems: '把模糊目标拆清楚，协调多人共同完成复杂任务',
+    work_style: '梳理优先级、连接协作方并持续跟进交付',
+    value_for: '为团队和业务建立更稳定的推进节奏与结果确定性',
     strengths: ['推进', '协调', '执行节奏'],
-    sample_roles: ['产品经理', '项目管理', '运营管理'],
-    keywords: ['执行', '推进', '协同', '组织', '管理', '产品', '运营', '落地', '项目'],
+    sample_roles: ['项目管理', '产品运营', '业务运营'],
+    keywords: ['执行', '推进', '协同', '组织', '管理', '运营', '落地', '项目', '优先级', '目标拆解'],
   },
   {
-    id: 'expression-influence',
-    name: '内容表达与影响型',
-    tagline: '适合用表达建立理解、信任与影响的人。',
-    fit_reason: '如果你擅长把感受、观点或复杂内容讲明白，这类方向更容易积累可见价值。',
+    id: 'content-knowledge-communication',
+    name: '内容与知识表达方向',
+    tagline: '把复杂内容讲清楚，帮助他人理解和行动。',
+    preferred_problems: '把难理解的信息整理成清晰、有吸引力的内容',
+    work_style: '通过写作、叙事、编辑和信息设计建立理解',
+    value_for: '为受众、客户和团队降低理解成本并建立信任',
     strengths: ['表达', '叙事', '影响力'],
-    sample_roles: ['品牌内容', '市场策划', '新媒体运营'],
-    keywords: ['表达', '内容', '创意', '写作', '传播', '品牌', '叙事', '营销'],
+    sample_roles: ['内容策略', '技术写作', '品牌内容'],
+    keywords: ['表达', '内容', '创意', '写作', '传播', '品牌', '叙事', '文档', '知识', '编辑'],
   },
   {
-    id: 'relationship-service',
-    name: '高信任关系服务型',
-    tagline: '适合通过理解与陪伴创造价值的人。',
-    fit_reason: '你更可能在需要长期信任、共情沟通和陪伴支持的工作中建立自己的不可替代性。',
+    id: 'customer-success-advisory',
+    name: '客户成功与顾问服务方向',
+    tagline: '理解他人需求，通过长期协作帮助对方获得结果。',
+    preferred_problems: '理解不同人的真实需求，并帮助他们跨过使用或决策障碍',
+    work_style: '倾听、澄清、建立信任并持续跟进问题解决',
+    value_for: '为客户和用户提供更有把握的支持与成长体验',
     strengths: ['共情', '倾听', '关系建立'],
-    sample_roles: ['用户成功', '职业辅导', '客户顾问'],
+    sample_roles: ['客户成功', '解决方案顾问', '用户运营'],
     keywords: ['共情', '倾听', '陪伴', '支持', '服务', '关系', '顾问', '咨询'],
   },
   {
-    id: 'system-optimization',
-    name: '流程优化与系统型',
-    tagline: '适合把混乱局面梳理成稳定机制的人。',
-    fit_reason: '如果你天然会关注结构、秩序和效率，这类岗位更容易让你的优势被长期看见。',
+    id: 'process-data-operations',
+    name: '流程与数据运营方向',
+    tagline: '梳理流程和数据，让复杂工作运行得更稳定。',
+    preferred_problems: '发现流程中的重复、混乱和低效，并建立稳定机制',
+    work_style: '通过结构化整理、数据观察和规则设计持续优化',
+    value_for: '为团队和组织提升效率、质量与可预测性',
     strengths: ['结构化', '流程意识', '稳定输出'],
-    sample_roles: ['流程运营', '数据运营', '供应链协调'],
+    sample_roles: ['流程运营', '数据运营', '业务分析'],
     keywords: ['流程', '系统', '结构', '秩序', '优化', '数据', '稳定', '规范'],
   },
 ];
@@ -272,22 +304,35 @@ export function extractPotentialRoles(report: CareerReport) {
   return Array.from(roles).slice(0, 8);
 }
 
-export function buildPathMapPreview(report: CareerReport): PathMapPreview {
+export function buildPathMapPreview(report: CareerReport, messages: StoredCareerSampleMessage[] = []): PathMapPreview {
   const potentialRoles = extractPotentialRoles(report);
+  const userSignals = filterCareerProfileMaterialMessages(messages)
+    .filter((message) => message.role === 'user' && typeof message.content === 'string')
+    .map((message) => normalizeSampleText(message.content))
+    .filter(Boolean);
   const signalText = [
     report.archetype,
     report.summary,
     ...(report.skills || []),
     ...potentialRoles,
     ...(report.superpowers || []).map(extractTextFromSuperpower),
+    ...userSignals,
   ]
     .join(' ')
     .toLowerCase();
 
   const ranked = DIRECTION_LIBRARY.map((direction) => {
-    const score = direction.keywords.reduce((acc, keyword) => {
+    const reportScore = direction.keywords.reduce((acc, keyword) => {
       return acc + (signalText.includes(keyword.toLowerCase()) ? 2 : 0);
     }, 0);
+    const roleScore = potentialRoles.reduce((score, role) => {
+      const normalizedRole = role.toLowerCase();
+      return score + (direction.sample_roles.some((sampleRole) => normalizedRole.includes(sampleRole.toLowerCase()) || sampleRole.toLowerCase().includes(normalizedRole)) ? 4 : 0);
+    }, 0);
+    const conversationScore = userSignals.reduce((score, signal) => {
+      return score + direction.keywords.filter((keyword) => signal.includes(keyword)).length * 3;
+    }, 0);
+    const score = reportScore + roleScore + conversationScore;
     return { ...direction, score };
   })
     .sort((a, b) => b.score - a.score)
@@ -313,24 +358,43 @@ export function buildPathMapPreview(report: CareerReport): PathMapPreview {
             : direction.sample_roles;
       const strengthText = evidenceStrengths.length ? evidenceStrengths.join('、') : report.archetype;
       const roleText = sampleRoles.length ? sampleRoles.slice(0, 3).join('、') : '相关岗位';
+      const reportEvidence = evidenceStrengths.slice(0, 2).map((strength) => `报告中反复出现“${strength}”相关能力。`);
+      const conversationEvidence = userSignals
+        .filter((signal) => direction.keywords.some((keyword) => signal.includes(keyword)))
+        .slice(-1)
+        .map((signal) => `你在对话中提到：“${signal.slice(0, 72)}${signal.length > 72 ? '…' : ''}”`);
+      const evidence = [...conversationEvidence, ...reportEvidence].slice(0, 3);
 
       return {
         id: direction.id,
         name: direction.name,
         tagline: direction.tagline,
+        preferred_problems: direction.preferred_problems,
+        work_style: direction.work_style,
+        value_for: direction.value_for,
         fit_reason:
           index === 0
-            ? `先把它当作优先验证的方向假设。它和你目前呈现出的“${strengthText}”更接近，可先用${roleText}做现实校准，看真实日常是否匹配你的工作方式。`
-            : `这是相邻备选假设，适合用来做对照。你可以留意${roleText}，判断自己更适合靠近哪类工作节奏。`,
+            ? `你目前呈现出的${strengthText}，在${roleText}这类工作中更容易转化为具体价值。`
+            : `这个方向也能承接你的部分优势，为职业选择提供另一种值得了解的可能。`,
+        evidence: evidence.length ? evidence : [`报告将“${strengthText}”列为当前较稳定的能力线索。`],
+        uncertainty: `还需要确认你是否喜欢${roleText}真实日常中的核心任务、协作方式和结果压力。`,
+        first_action: `找 1 条“${sampleRoles[0] || direction.name}”真实岗位描述，圈出最常出现的 3 个任务，并标记哪些让你期待、哪些让你犹豫。`,
         strengths: evidenceStrengths,
         sample_roles: sampleRoles,
       };
     });
 
   return {
-    headline: `把“${report.archetype}”翻译成现实职业方向`,
-    introduction:
-      '这份预览不会直接替你下结论，而是先把你的职业画像转换成值得认真考虑的方向轮廓，让你更稳地判断“先往哪里走”。',
+    headline: '从你的真实线索里，找到值得先验证的职业方向',
+    introduction: '这里不是直接给出职业答案，而是把报告和对话里已经出现的线索，整理成可以进入现实验证的方向。',
+    evidence_summary: userSignals.length
+      ? `这版判断综合了职业报告，以及你在对话中留下的 ${userSignals.length} 条有效表达。`
+      : '这版判断主要依据当前职业报告；进入现实路径后，可以继续用真实经历和岗位样本校准。',
+    work_profile: {
+      preferred_problems: ranked[0]?.preferred_problems || '找到真正值得投入的问题，并逐步看清解决路径',
+      work_style: ranked[0]?.work_style || '结合观察、思考和行动逐步推进',
+      value_for: ranked[0]?.value_for || '为真实用户、团队或客户创造可感知的价值',
+    },
     direction_clusters: ranked,
     market_insight_prompts: [
       '同一岗位在不同行业里的真实工作差异是什么。',

@@ -1,7 +1,8 @@
-import { createOpenAI } from '@ai-sdk/openai';
 import { generateObject } from 'ai';
 import { z } from 'zod';
 import { sanitizeResponseContent } from '@/lib/utils';
+import { createLlmClient } from '@/lib/tokendance';
+import { recordAiUsage } from '@/lib/token-usage';
 
 export const runtime = 'edge';
 export const maxDuration = 60;
@@ -20,10 +21,13 @@ export async function POST(req: Request) {
   try {
     const { role, archetype, context } = await req.json();
 
-    const openai = createOpenAI({
-      baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-      apiKey: process.env.DASHSCOPE_API_KEY,
-    });
+    const llm = createLlmClient();
+    if (!llm) {
+      return new Response(JSON.stringify({ error: 'Missing model API key' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
 
     const systemPrompt = `
     You are an expert career counselor with a "Professional yet Inspiring" tone.
@@ -53,8 +57,8 @@ export async function POST(req: Request) {
        - **REQUIRED**: Use proper Chinese punctuation (，。、：) throughout.
     `;
 
-    const { object } = await generateObject({
-      model: openai('qwen-plus'),
+    const { object, usage } = await generateObject({
+      model: llm.openai(llm.chatModel),
       schema: roleAnalysisSchema,
       system: systemPrompt,
       messages: [
@@ -62,6 +66,7 @@ export async function POST(req: Request) {
       ],
       mode: 'json',
     });
+    await recordAiUsage({ req, route: 'analyze-role', model: llm.chatModel, usage });
 
     const sanitizedObject = sanitizeResponseContent(object);
 

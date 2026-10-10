@@ -1,8 +1,9 @@
-import { createOpenAI } from '@ai-sdk/openai';
 import { generateObject } from 'ai';
 import { z } from 'zod';
 import { sanitizeResponseContent } from '@/lib/utils';
 import { GENTLE_BREEZE_V4_REPORT_PROMPT } from '@/lib/prompt-versions';
+import { createLlmClient } from '@/lib/tokendance';
+import { recordAiUsage } from '@/lib/token-usage';
 
 export const runtime = 'edge';
 export const maxDuration = 60;
@@ -51,10 +52,13 @@ export async function POST(req: Request) {
       });
     }
 
-    const openai = createOpenAI({
-      baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-      apiKey: process.env.DASHSCOPE_API_KEY,
-    });
+    const llm = createLlmClient();
+    if (!llm) {
+      return new Response(JSON.stringify({ error: 'Missing model API key' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
 
     // Use the same empathetic report prompt for consistency in tone
     const systemPrompt = GENTLE_BREEZE_V4_REPORT_PROMPT + `
@@ -68,8 +72,8 @@ export async function POST(req: Request) {
     
     Output structured JSON.`;
 
-    const { object } = await generateObject({
-      model: openai('qwen-plus'),
+    const { object, usage } = await generateObject({
+      model: llm.openai(llm.chatModel),
       schema: roleComparisonSchema,
       system: systemPrompt,
       messages: [
@@ -77,6 +81,7 @@ export async function POST(req: Request) {
       ],
       mode: 'json',
     });
+    await recordAiUsage({ req, route: 'compare-roles', model: llm.chatModel, usage });
 
     const sanitizedObject = sanitizeResponseContent(object);
 

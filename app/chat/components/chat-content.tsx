@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import { MessageRenderer } from '@/components/message-renderer';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { authHeaders } from '@/lib/api-auth';
 import { AuthDialog } from '@/components/auth-dialog';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
 import { trackEvent } from '@/lib/analytics-client';
@@ -305,6 +306,7 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
 
         fetch('/api/summarize', {
           method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
           body: JSON.stringify({ messages: messagesToSync }),
         })
           .then((res) => res.json())
@@ -345,9 +347,15 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
     }
   };
 
+  const [chatHeaders, setChatHeaders] = useState<Record<string, string>>({});
+  useEffect(() => {
+    authHeaders().then(setChatHeaders);
+  }, []);
+
   const { messages, append, isLoading, error, setMessages } = useChat({
     api: '/api/chat',
     initialMessages: initialChatMessages,
+    headers: chatHeaders,
     onResponse: async () => {
       try {
         const user = await safeGetUser();
@@ -579,6 +587,7 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
       if (currentConversationId) {
         fetch('/api/summarize', {
           method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
           body: JSON.stringify({ messages: materialMessages }),
         })
           .then((res) => res.json())
@@ -867,7 +876,7 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
 
       const response = await fetch('/api/report', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
         body: JSON.stringify({ messages: materialForReport }),
         signal: controller.signal,
       });
@@ -955,7 +964,7 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
             <div className="flex items-center gap-3">
               <div className="flex flex-col">
                 <h1 className="text-lg font-medium tracking-tight text-foreground/80">EchoTalent</h1>
-                <span className="text-[10px] text-muted-foreground tracking-widest uppercase opacity-70">v4.5.5</span>
+                <span className="text-[10px] text-muted-foreground tracking-widest uppercase opacity-70">v4.6.6</span>
               </div>
             </div>
             <div className="flex items-center gap-1.5 sm:gap-2">

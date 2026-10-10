@@ -1,5 +1,29 @@
 # AI 助手合作日志
 
+## 2026-10-10（周报新增 AI 用量分析 + v4.6.6 发布准备）
+
+- 管理员周报/月报新增「AI 用量（计费与定价参考）」板块：周期内总 Token/调用次数、登录活跃用户与人均 Token、匿名消耗 tokens/次数/来源数与占比（免费额度成本）、单次消耗 P50/P90（套餐档位锚点）、单人峰值（不含身份）、分路由消耗 Top8；文本版、HTML 版与运营洞察同步接入。
+- 实现：`lib/weekly-report.ts` 在周期查询中加入 `ai_usage_events` 第四路并行查询，新增 `UsageEventRow` 与聚合逻辑；周报只含聚合指标，不含用户身份或 IP 明文。
+- 验证：tsc 零错误；本地 preview 下真实调用入账（summarize 448、coach/chat 4561 tokens），通过本地管理员接口读取周报 JSON，`aiUsage` 正常输出（上一自然周窗口内为 0 属正确——表当天才建）；插入上周时间戳测试行后聚合数值全部正确（calls/tokens/匿名归属/P50/P90/byRoute），测试行已删除（204）。
+- 版本面同步 v4.6.6：package.json、package-lock.json、CHANGELOG.md、README.md 最新版本段、`/chat` 角标；v4.5.5 之后 4 个未随版本发布的提交（周报增强、SEO、注册体验）一并写入 v4.6.6 摘要。
+
+## 2026-10-10（AI 用量统计：按用户记账 + 个人中心展示）
+
+- 口径（用户确认）：所有 AI 调用计入用量；匿名调用按 IP 记免费额度（本期不拦截）；本期只统计+展示。
+- 新建迁移 `supabase/migrations/20261010_000011_ai_usage_events.sql`（待用户在 Supabase 执行）：`ai_usage_events` 表记录 user_id/anonymous_ip/route/model/prompt+completion+total tokens；RLS 开启且无客户端策略，仅 service role 读写。
+- 新建 `lib/token-usage.ts`：`recordAiUsage`（Authorization 头解析 Supabase 登录态，匿名落 anonymous_ip，失败静默不影响主流程）+ `getAiUsageSummary`（本月/累计 token、调用次数、分路由）。
+- `lib/tokendance.ts`：`llmChatCompletion` 返回 `{ content, model, usage }`；11 条 LLM 路由全部接入记账（chat 用 streamText onFinish，其余 generateObject/generateText 取 usage；4 条 raw fetch 路由在共享 helper 内记账）。
+- 新增 `/api/usage/me`（需登录态，未登录 401）；前端新建 `lib/api-auth.ts` authHeaders 助手，chat（useChat headers state）、summarize、report、career-path/preview、analyze-role、compare-roles、coach/chat×3、coach/path/chat 等调用点附带 Authorization。
+- 个人中心 `/user-center`：新增 AI 用量卡片（本月 Token/调用、累计 Token、本月分路由 Top4），登录态下显示用户标识。
+- 验证：tsc 对本次全部新增/改动文件零错误（仓库存在与本次无关的既有类型错误，next.config ignoreBuildErrors=true）；冒烟 /api/summarize、/api/coach/chat 匿名正常返回，/api/usage/me 未登录返回 401。数据写入待建表后生效。
+
+## 2026-10-10（接入 TokenDance 多模型网关）
+
+- 新建共享模块 `lib/tokendance.ts`：统一解析模型网关（优先 `TOKENDANCE_API_KEY` 走 `https://tokendance.space/gateway/v1`，未配置时回落 DashScope 兼容模式），导出 AI SDK 客户端工厂与 `llmChatCompletion` 裸 fetch 助手。
+- 迁移 11 处模型调用：AI SDK 路由（chat/report/plan/summarize/compare-roles/analyze-role/career-path preview）与裸 fetch 路由（coach/chat、coach/analysis、coach/opportunity-search、coach/path/chat）全部改走共享网关，模型别名 `qwen-plus` 更新为 TokenDance 目录中的 `qwen3.7-plus`；提示词、参数、流式与 JSON 输出行为不变。
+- 不在迁移范围：DashScope 原生 ASR（paraformer）与 TTS（qwen3-tts）、独立 Key 的 Gemini/DeepSeek 备选通道保持原样。
+- 验证：直连网关普通对话与 `response_format: json_object` 均通过；本地 preview 下 `/api/summarize`（SDK 路径）返回正确标题、`/api/coach/chat`（裸 fetch 路径）返回正常教练回复。生产部署前需在 Vercel 环境变量中添加 `TOKENDANCE_API_KEY`，否则生产继续走 DashScope。
+
 ## 2026-09-11（周报可视化、爬虫过滤与渠道增强）
 
 - 周报 HTML 版重构：新增 KPI 卡片、每日访问折线图（SVG）、数据表格，以及根据 PV/UV/注册/回访/来源/地域自动生成的「运营洞察」段落；纯文本版同步增加洞察摘要。

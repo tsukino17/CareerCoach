@@ -1,5 +1,6 @@
 'use client';
 
+import { authHeaders } from '@/lib/api-auth';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
@@ -545,7 +546,7 @@ export default function ReportPage() {
       const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
       const res = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
         body: JSON.stringify(body),
         signal: controller.signal,
       });

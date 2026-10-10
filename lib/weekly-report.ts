@@ -14,6 +14,12 @@ type EventRow = {
 
 type ProfileRow = { created_at: string | null };
 type MessageRow = { conversation_id: string | null; role: string | null; created_at: string | null };
+type UsageEventRow = {
+  user_id: string | null;
+  anonymous_ip: string | null;
+  route: string | null;
+  total_tokens: number | null;
+};
 
 function dayKey(iso: string) { return iso.slice(0, 10); }
 function countBy(values: string[]) {
@@ -28,7 +34,12 @@ function numberValue(value: unknown) {
 function formatDuration(ms: number) {
   const seconds = Math.round(ms / 1000);
   if (seconds < 60) return `${seconds}秒`;
-  return `${Math.floor(seconds / 60)}分${seconds % 60 ? `${seconds % 60}秒` : ''}`;
+  const minutes = Math.floor(seconds / 60);
+  const remainSec = seconds % 60;
+  if (minutes < 60) return `${minutes}分${remainSec ? `${remainSec}秒` : ''}`;
+  const hours = Math.floor(minutes / 60);
+  const remainMin = minutes % 60;
+  return `${hours}小时${remainMin ? `${remainMin}分` : ''}`;
 }
 function isProduction(event: EventRow) {
   if (event.metadata?.isProductionSite === true) return true;
@@ -127,10 +138,11 @@ async function buildPeriodicReport(supabase: SupabaseClient, now: Date, cadence:
   const end = until.toISOString();
   const period = { start: since.toISOString().slice(0, 10), end: until.toISOString().slice(0, 10) };
 
-  const [{ data: eventData, error: eventError }, { data: profileData, error: profileError }, { data: messageData, error: messageError }] = await Promise.all([
+  const [{ data: eventData, error: eventError }, { data: profileData, error: profileError }, { data: messageData, error: messageError }, { data: usageData, error: usageError }] = await Promise.all([
     supabase.from('analytics_events').select('event_name,page,step,status,session_id,user_id,metadata,user_agent,created_at').gte('created_at', start).lte('created_at', end).limit(50000),
     supabase.from('user_profiles').select('created_at').gte('created_at', start).lte('created_at', end).limit(10000),
     supabase.from('messages').select('conversation_id,role,created_at').gte('created_at', start).lte('created_at', end).limit(30000),
+    supabase.from('ai_usage_events').select('user_id,anonymous_ip,route,total_tokens').gte('created_at', start).lte('created_at', end).limit(50000),
   ]);
   if (eventError) throw eventError;
   const events = ((eventData || []) as EventRow[]).filter(isProduction);
@@ -143,15 +155,19 @@ async function buildPeriodicReport(supabase: SupabaseClient, now: Date, cadence:
   const allProfiles = (allProfilesData || []) as Array<{ user_id: string }>;
   const authUsers = authUsersData?.users || [];
 
-  // All-time unique visitors: distinct user_id + anonymousVisitorId + session_id
+  // All-time unique visitors: only page_view events, exclude bots, production only
   const { data: allTimeVisitorsData, error: allTimeVisitorsError } = await supabase
     .from('analytics_events')
-    .select('user_id,session_id,metadata')
+    .select('user_id,session_id,metadata,user_agent,event_name')
+    .eq('event_name', 'page_view')
     .limit(100000);
   let totalVisitors = 0;
   if (!allTimeVisitorsError && allTimeVisitorsData) {
     const visitorSet = new Set<string>();
-    for (const row of allTimeVisitorsData as Array<{ user_id: string | null; session_id: string | null; metadata: Record<string, unknown> | null }>) {
+    const rows = allTimeVisitorsData as Array<{ user_id: string | null; session_id: string | null; metadata: Record<string, unknown> | null; user_agent: string | null; event_name: string | null }>;
+    for (const row of rows) {
+      if (!isProduction(row as EventRow)) continue;
+      if (isBotUserAgent(row.user_agent || '')) continue;
       const key = row.user_id || (typeof row.metadata?.anonymousVisitorId === 'string' ? row.metadata.anonymousVisitorId : null) || row.session_id;
       if (key) visitorSet.add(key);
     }
@@ -190,6 +206,7 @@ async function buildPeriodicReport(supabase: SupabaseClient, now: Date, cadence:
     pageMap.set(page, item);
   }
   const duration = humanEngagements.reduce((sum, event) => sum + numberValue(event.metadata?.durationMs), 0);
+  const activeDuration = humanEngagements.reduce((sum, event) => sum + numberValue(event.metadata?.activeDurationMs), 0);
   const userMessages = messages.filter((message) => message.role === 'user').length;
   const anonymousUserMessages = anonymousMessages.filter((event) => event.metadata?.role === 'user').length;
   const anonymousAssistantMessages = anonymousMessages.filter((event) => event.metadata?.role === 'assistant').length;
@@ -232,6 +249,49 @@ async function buildPeriodicReport(supabase: SupabaseClient, now: Date, cadence:
     else if (days.size <= 6) activeDayBuckets['4-6天'] += 1;
     else activeDayBuckets['7天及以上'] += 1;
   }
+
+  // AI token 用量（计费与定价参考；不含用户身份信息）
+  const usageEvents = (usageData || []) as UsageEventRow[];
+  const authUsageEvents = usageEvents.filter((event) => event.user_id);
+  const anonUsageEvents = usageEvents.filter((event) => !event.user_id);
+  const usagePerUser = new Map<string, number>();
+  for (const event of authUsageEvents) {
+    const key = event.user_id as string;
+    usagePerUser.set(key, (usagePerUser.get(key) || 0) + (event.total_tokens || 0));
+  }
+  const usageRouteMap = new Map<string, { tokens: number; calls: number }>();
+  for (const event of usageEvents) {
+    const route = event.route || 'unknown';
+    const item = usageRouteMap.get(route) || { tokens: 0, calls: 0 };
+    item.tokens += event.total_tokens || 0;
+    item.calls += 1;
+    usageRouteMap.set(route, item);
+  }
+  const perCallTokens = usageEvents.map((event) => event.total_tokens || 0).sort((a, b) => a - b);
+  const percentileAt = (sorted: number[], ratio: number) => (sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * ratio))] : 0);
+  const usageTotalCalls = usageEvents.length;
+  const usageTotalTokens = usageEvents.reduce((sum, event) => sum + (event.total_tokens || 0), 0);
+  const authUsageTokens = authUsageEvents.reduce((sum, event) => sum + (event.total_tokens || 0), 0);
+  const anonUsageTokens = anonUsageEvents.reduce((sum, event) => sum + (event.total_tokens || 0), 0);
+  const aiUsage = {
+    calls: usageTotalCalls,
+    totalTokens: usageTotalTokens,
+    activeUsers: usagePerUser.size,
+    authTokens: authUsageTokens,
+    authCalls: authUsageEvents.length,
+    avgPerCall: usageTotalCalls ? Math.round(usageTotalTokens / usageTotalCalls) : 0,
+    avgPerUser: usagePerUser.size ? Math.round(authUsageTokens / usagePerUser.size) : 0,
+    anonTokens: anonUsageTokens,
+    anonCalls: anonUsageEvents.length,
+    anonIps: new Set(anonUsageEvents.map((event) => event.anonymous_ip).filter(Boolean)).size,
+    p50PerCall: percentileAt(perCallTokens, 0.5),
+    p90PerCall: percentileAt(perCallTokens, 0.9),
+    maxUserTokens: usagePerUser.size ? Math.max(...usagePerUser.values()) : 0,
+    byRoute: [...usageRouteMap.entries()]
+      .map(([name, item]) => ({ name, tokens: item.tokens, calls: item.calls }))
+      .sort((a, b) => b.tokens - a.tokens)
+      .slice(0, 8),
+  };
   const report = {
     period,
     totals: {
@@ -275,7 +335,8 @@ async function buildPeriodicReport(supabase: SupabaseClient, now: Date, cadence:
       repeatMeaningfulRate: visitorDays.size ? Number(((repeatMeaningfulUsers / visitorDays.size) * 100).toFixed(1)) : 0,
       activeDayBuckets,
     },
-    setupWarnings: [profileError && 'user_profiles 查询失败，新增注册数可能不完整。', allProfilesError && 'user_profiles 总数查询失败。', authUsersError && '认证用户查询失败，总注册数可能不完整。', messageError && 'messages 查询失败，对话数可能不完整。', allTimeVisitorsError && 'analytics_events 历史查询失败，总访客数可能不完整。'].filter(Boolean),
+    setupWarnings: [profileError && 'user_profiles 查询失败，新增注册数可能不完整。', allProfilesError && 'user_profiles 总数查询失败。', authUsersError && '认证用户查询失败，总注册数可能不完整。', messageError && 'messages 查询失败，对话数可能不完整。', allTimeVisitorsError && 'analytics_events 历史查询失败，总访客数可能不完整。', usageError && 'ai_usage_events 查询失败，AI 用量数据可能不完整。'].filter(Boolean),
+    aiUsage,
   };
   return report;
 }
@@ -289,7 +350,7 @@ function escHtml(value: unknown) {
 }
 
 function buildInsights(report: WeeklyReport): string[] {
-  const { totals, daily, topPages, retention, sources, cities, bots } = report;
+  const { totals, daily, topPages, retention, sources, cities, bots, aiUsage } = report;
   const insights: string[] = [];
   const perCapita = totals.uv ? (totals.pv / totals.uv).toFixed(1) : '—';
   insights.push(`本周共 ${totals.pv} 次访问、${totals.uv} 位访客，人均浏览 ${perCapita} 页，平均有效停留 ${totals.avgEngagement}。全站历史累计访客 ${totals.totalVisitors} 人，累计注册 ${totals.registeredUsers} 人。`);
@@ -336,6 +397,14 @@ function buildInsights(report: WeeklyReport): string[] {
 
   if (cities.length && cities[0].name !== '未知城市') {
     insights.push(`地域分布以「${cities[0].name}」领先（${cities[0].count} 次），可用于判断内容与目标人群的匹配度。`);
+  }
+
+  if (aiUsage.calls > 0) {
+    const topRoute = aiUsage.byRoute[0];
+    const anonShare = aiUsage.totalTokens ? Math.round((aiUsage.anonTokens / aiUsage.totalTokens) * 100) : 0;
+    insights.push(
+      `AI 用量：本周 ${aiUsage.calls} 次模型调用共 ${aiUsage.totalTokens.toLocaleString('en-US')} tokens，登录用户 ${aiUsage.activeUsers} 人（人均 ${aiUsage.avgPerUser.toLocaleString('en-US')}），单次消耗中位 ${aiUsage.p50PerCall.toLocaleString('en-US')}、P90 ${aiUsage.p90PerCall.toLocaleString('en-US')}${topRoute ? `，大头是「${topRoute.name}」（${Math.round((topRoute.tokens / aiUsage.totalTokens) * 100)}%）` : ''}；匿名消耗占 ${anonShare}%，是免费额度的成本基准。`
+    );
   }
 
   return insights;
@@ -422,6 +491,13 @@ export function renderWeeklyReportText(report: Awaited<ReturnType<typeof buildWe
     `粘性：回访用户 ${report.retention.repeatVisitors}/${report.retention.visitors}（${report.retention.repeatVisitorRate}%），重复有效使用 ${report.retention.repeatMeaningfulUsers} 人（${report.retention.repeatMeaningfulRate}%）`,
     `活跃天数：${Object.entries(report.retention.activeDayBuckets).map(([name, count]) => `${name} ${count}`).join('，')}`,
     '',
+    'AI 用量（计费与定价参考）：',
+    `- 调用 ${report.aiUsage.calls} 次，总消耗 ${report.aiUsage.totalTokens.toLocaleString('en-US')} tokens（单次平均 ${report.aiUsage.avgPerCall.toLocaleString('en-US')}）`,
+    `- 登录用户 ${report.aiUsage.activeUsers} 人，人均 ${report.aiUsage.avgPerUser.toLocaleString('en-US')} tokens，单人峰值 ${report.aiUsage.maxUserTokens.toLocaleString('en-US')}（不含身份信息）`,
+    `- 匿名调用 ${report.aiUsage.anonCalls} 次 / ${report.aiUsage.anonTokens.toLocaleString('en-US')} tokens（约 ${report.aiUsage.anonIps} 个来源，占总量 ${report.aiUsage.totalTokens ? Math.round((report.aiUsage.anonTokens / report.aiUsage.totalTokens) * 100) : 0}%）`,
+    `- 单次消耗：中位 ${report.aiUsage.p50PerCall.toLocaleString('en-US')}，P90 ${report.aiUsage.p90PerCall.toLocaleString('en-US')}（P90 可作为套餐档位锚点）`,
+    `- 分路由：${report.aiUsage.byRoute.map((item) => `${item.name} ${item.tokens.toLocaleString('en-US')}/${item.calls}次`).join('，') || '无'}`,
+    '',
     '指标说明：',
     '- PV（Page View）：页面被打开或切换显示的总次数，同一个人多次访问会重复计算。',
     '- UV（Unique Visitor）：周期内去重后的访客数，优先按登录用户或匿名会话识别。',
@@ -429,12 +505,13 @@ export function renderWeeklyReportText(report: Awaited<ReturnType<typeof buildWe
     '- page_engagement：用户离开页面、切换路由或页面隐藏时上报的停留与滚动事件，用于估算有效停留。',
     '- 对话：同时统计登录用户 messages 表，以及匿名用户的 anonymous_chat_message 埋点。',
     '- 城市、设备和浏览器：根据访问请求的地理标记与 User-Agent 聚合，IP 不直接写入周报。',
+    '- AI 用量：按 ai_usage_events 流水聚合，只含聚合指标，不含用户身份或 IP 明文。',
     ...(report.setupWarnings.length ? ['', `提示：${report.setupWarnings.join(' ')}`] : []),
   ].join('\n');
 }
 
 export function renderWeeklyReportHtml(report: WeeklyReport, title = '网站周报') {
-  const { period, totals, daily, topPages, funnel, events, sources, channels, campaigns, cities, browsers, devices, deviceModels, operatingSystems, retention, bots, setupWarnings } = report;
+  const { period, totals, daily, topPages, funnel, events, sources, channels, campaigns, cities, browsers, devices, deviceModels, operatingSystems, retention, bots, setupWarnings, aiUsage } = report;
   const insights = buildInsights(report);
   const perCapita = totals.uv ? (totals.pv / totals.uv).toFixed(1) : '—';
 
@@ -489,6 +566,20 @@ export function renderWeeklyReportHtml(report: WeeklyReport, title = '网站周�
     ['重复有效使用率', `${retention.repeatMeaningfulRate}%`],
   ])}${renderDataTable(['活跃天数', '人数'], Object.entries(retention.activeDayBuckets).map(([name, count]) => [name, count]))}`);
 
+  const kpiAi = [kpiCell(aiUsage.totalTokens.toLocaleString('en-US'), 'AI 总 Token'), kpiCell(String(aiUsage.calls), '模型调用次数'), kpiCell(aiUsage.avgPerUser.toLocaleString('en-US'), '登录用户人均 Token'), kpiCell(`${aiUsage.anonTokens ? Math.round((aiUsage.anonTokens / aiUsage.totalTokens) * 100) : 0}%`, '匿名消耗占比')].join('');
+  const aiUsageSection = section('AI 用量（计费与定价参考）', `
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:separate;border-spacing:8px;margin-bottom:14px;"><tr>${kpiAi}</tr></table>
+    ${renderDataTable(['指标', '数值'], [
+      ['单次消耗 · 中位 P50', aiUsage.p50PerCall.toLocaleString('en-US')],
+      ['单次消耗 · P90（套餐档位锚点）', aiUsage.p90PerCall.toLocaleString('en-US')],
+      ['登录活跃用户 / 人均 Token', `${aiUsage.activeUsers} 人 / ${aiUsage.avgPerUser.toLocaleString('en-US')}`],
+      ['登录用户消耗合计', `${aiUsage.authTokens.toLocaleString('en-US')} tokens / ${aiUsage.authCalls} 次`],
+      ['匿名消耗（免费额度成本）', `${aiUsage.anonTokens.toLocaleString('en-US')} tokens / ${aiUsage.anonCalls} 次 / 约 ${aiUsage.anonIps} 个来源`],
+      ['单人峰值消耗（不含身份）', aiUsage.maxUserTokens.toLocaleString('en-US')],
+    ])}
+    <div style="margin-top:14px;">${renderDataTable(['路由', 'Tokens', '调用次数'], aiUsage.byRoute.map((item) => [item.name, item.tokens.toLocaleString('en-US'), item.calls]))}</div>
+  `);
+
   const warningText = setupWarnings.length ? `<p style="margin:0 0 20px;padding:12px;background:#fff7ed;border:1px solid #fdba74;border-radius:10px;color:#9a3412;font-size:12px;">${setupWarnings.map(escHtml).join('<br>')}</p>` : '';
 
   const footer = `
@@ -499,6 +590,7 @@ export function renderWeeklyReportHtml(report: WeeklyReport, title = '网站周�
       <div>page_view：页面打开/路由进入事件；page_engagement：离开页面或隐藏时上报的停留与滚动事件。</div>
       <div>对话：同时统计登录用户 messages 表与匿名用户 anonymous_chat_message 埋点。</div>
       <div>城市/设备/浏览器：按请求地理标记与 User-Agent 聚合，IP 不写入周报。</div>
+      <div>AI 用量：按 ai_usage_events 流水聚合，登录用户按账号去重、匿名按 IP 计数；周报只包含聚合指标，不含用户身份或 IP 明文。</div>
     </div>`;
 
   return `
@@ -529,6 +621,7 @@ export function renderWeeklyReportHtml(report: WeeklyReport, title = '网站周�
       ${osSection}
       ${browsersSection}
       ${retentionSection}
+      ${aiUsageSection}
       ${footer}
     </div>
   </div>`;

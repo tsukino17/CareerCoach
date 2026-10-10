@@ -1,16 +1,16 @@
-import { createOpenAI } from '@ai-sdk/openai';
 import { streamText, tool } from 'ai';
 import { z } from 'zod';
 import { COACH_MESSAGE_FORMATTING_RULES } from '@/lib/coach-message-formatting';
 import { GENTLE_BREEZE_V4_CHAT_PROMPT } from '@/lib/prompt-versions';
 import { checkRateLimitDistributed, getClientIp, normalizeMessages, rateLimitResponse } from '@/lib/rate-limit';
+import { createLlmClient } from '@/lib/tokendance';
+import { recordAiUsage } from '@/lib/token-usage';
 
 export const runtime = 'edge';
 export const maxDuration = 30;
 export const preferredRegion = ['hkg1', 'sin1', 'iad1']; // Prioritize Asia regions if available on plan
 
 const CONTINUE_CHAT_CONTROL_PREFIX = '[EchoTalent UI Action: continue_current_topic]';
-const CHAT_MODEL = process.env.CHAT_MODEL || 'qwen-plus';
 
 export async function POST(req: Request) {
   try {
@@ -37,17 +37,13 @@ export async function POST(req: Request) {
         headers: { 'Content-Type': 'application/json' },
       });
     }
-    if (!process.env.DASHSCOPE_API_KEY) {
+    const llm = createLlmClient();
+    if (!llm) {
       return new Response(JSON.stringify({ error: 'Missing model API key' }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' },
       });
     }
-
-    const openai = createOpenAI({
-      baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-      apiKey: process.env.DASHSCOPE_API_KEY,
-    });
 
     const isContinueChatAction = chatMessages.some(
       (message) => message.role === 'user' && message.content.startsWith(CONTINUE_CHAT_CONTROL_PREFIX)
@@ -74,9 +70,12 @@ export async function POST(req: Request) {
     }
 
     const result = streamText({
-      model: openai(CHAT_MODEL),
+      model: llm.openai(llm.chatModel),
       system: systemPrompt,
       messages: chatMessages,
+      onFinish: async ({ usage }) => {
+        await recordAiUsage({ req, route: 'chat', model: llm.chatModel, usage });
+      },
       tools: {
         enableReportButton: tool({
             description: 'Call this tool when you have gathered enough information about the user (Preferences, Willingness, Capabilities, Talents, Inclinations) and you have just asked the user if they want to see the report.',
