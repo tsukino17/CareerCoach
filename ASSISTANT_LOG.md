@@ -1,11 +1,11 @@
 # AI 助手合作日志
 
-## 2026-10-10（周报新增 AI 用量分析 + v4.6.6 发布准备）
+## 2026-10-10（周报新增 AI 用量分析 + v4.5.6 发布准备）
 
 - 管理员周报/月报新增「AI 用量（计费与定价参考）」板块：周期内总 Token/调用次数、登录活跃用户与人均 Token、匿名消耗 tokens/次数/来源数与占比（免费额度成本）、单次消耗 P50/P90（套餐档位锚点）、单人峰值（不含身份）、分路由消耗 Top8；文本版、HTML 版与运营洞察同步接入。
 - 实现：`lib/weekly-report.ts` 在周期查询中加入 `ai_usage_events` 第四路并行查询，新增 `UsageEventRow` 与聚合逻辑；周报只含聚合指标，不含用户身份或 IP 明文。
 - 验证：tsc 零错误；本地 preview 下真实调用入账（summarize 448、coach/chat 4561 tokens），通过本地管理员接口读取周报 JSON，`aiUsage` 正常输出（上一自然周窗口内为 0 属正确——表当天才建）；插入上周时间戳测试行后聚合数值全部正确（calls/tokens/匿名归属/P50/P90/byRoute），测试行已删除（204）。
-- 版本面同步 v4.6.6：package.json、package-lock.json、CHANGELOG.md、README.md 最新版本段、`/chat` 角标；v4.5.5 之后 4 个未随版本发布的提交（周报增强、SEO、注册体验）一并写入 v4.6.6 摘要。
+- 版本面同步 v4.5.6：package.json、package-lock.json、CHANGELOG.md、README.md 最新版本段、`/chat` 角标；v4.5.5 之后 4 个未随版本发布的提交（周报增强、SEO、注册体验）一并写入 v4.5.6 摘要。
 
 ## 2026-10-10（AI 用量统计：按用户记账 + 个人中心展示）
 

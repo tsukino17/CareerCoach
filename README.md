@@ -2,7 +2,7 @@
 
 > 从一次真诚的对话开始，理解你的职业优势，并把它转化为可以验证的现实路径。
 
-当前版本：**v4.6.6**
+当前版本：**v4.5.6**
 
 官网：[echotalent.fun](https://echotalent.fun)
 
@@ -80,7 +80,7 @@ EchoTalent 是一个 AI 职业探索产品。它不只给出一份静态测评�
 
 ![现实路径地图](docs/screenshots/03-path.png)
 
-## 最新版本 · v4.6.6
+## 最新版本 · v4.5.6
 
 ### 模型网关与用量统计 (Model Gateway & Metering)
 
