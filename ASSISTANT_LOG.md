@@ -1,6 +1,14 @@
 # AI 助手合作日志
 
-## 2026-10-10（周报新增 AI 用量分析 + v4.5.6 发布准备）
+## 2026-10-10（v4.5.6 发布上线 + Vercel 项目分裂修复）
+
+- 发布 v4.5.6（Model Gateway & Metering）：TokenDance 网关、AI 用量记账、个人中心用量卡片、周报 AI 用量板块。版本号经用户纠正从误定的 4.6.6 改为 4.5.6（4.5.5 顺延），并确认规则：版本号取值须问清用户决定。
+- 构建修复：`uuid` 依赖缺失导致生产构建失败（app/api/audio/* 引用未声明），`npm install uuid` 后通过。
+- 重大基础设施发现：GitHub 仓库同时挂了两个 Vercel 项目——`career`（新项目，接收 git push 自动构建但环境变量不完整，曾导致生产 chat 报 internal error）和 `career-coach`（真正的生产项目，持有 echotalent.fun 且环境变量齐全，含用户添加的 TOKENDANCE_API_KEY）。已将本地 `.vercel` 链接从 career 切到 career-coach 并 `vercel --prod` 部署，echotalent.fun 自动指向新部署。
+- 生产验证：角标 v4.5.6、流式对话正常、无 UI 报错；用量表新增生产记账行（chat / qwen3.7-plus / 4371 tokens）。
+- 遗留：`career` 项目成为孤儿（有几个 Preview 部署和 1 个误加的环境变量），建议用户在 Vercel 后台删除或解绑 GitHub 仓库；`www.echotalent.fun` 证书签发报错，若需要 www 访问需在后台检查 DNS/证书。
+
+## 2026-10-10（周报新增 AI 用量分析 + v4.6.6 发布准备）
 
 - 管理员周报/月报新增「AI 用量（计费与定价参考）」板块：周期内总 Token/调用次数、登录活跃用户与人均 Token、匿名消耗 tokens/次数/来源数与占比（免费额度成本）、单次消耗 P50/P90（套餐档位锚点）、单人峰值（不含身份）、分路由消耗 Top8；文本版、HTML 版与运营洞察同步接入。
 - 实现：`lib/weekly-report.ts` 在周期查询中加入 `ai_usage_events` 第四路并行查询，新增 `UsageEventRow` 与聚合逻辑；周报只含聚合指标，不含用户身份或 IP 明文。
