@@ -46,7 +46,7 @@ async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = F
 }
 
 async function fetchAudioAsBase64(url: string): Promise<string> {
-  const response = await fetchWithTimeout(url);
+  const response = await fetchWithTimeout(url, {});
   if (!response.ok) {
     throw new Error(`下载音频失败: HTTP ${response.status}`);
   }

@@ -139,3 +139,121 @@ export async function getAiUsageSummary(userId: string): Promise<AiUsageSummary>
       .sort((a, b) => b.totalTokens - a.totalTokens),
   };
 }
+
+export type AiUsageAdminStats = {
+  totalTokens: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalCalls: number;
+  avgTokensPerCall: number;
+  uniqueUsers: number;
+  avgTokensPerUser: number;
+  byRoute: Array<{ route: string; tokens: number; calls: number; promptTokens: number; completionTokens: number }>;
+  byUser: Array<{ userKey: string; tokens: number; calls: number }>;
+  byDay: Array<{ date: string; tokens: number; calls: number }>;
+  byModel: Array<{ model: string; tokens: number; calls: number }>;
+};
+
+// 管理端用量统计：按日期范围查询全量 AI 调用数据
+export async function getAiUsageAdminStats(since: string, until: string): Promise<AiUsageAdminStats> {
+  const admin = getAdmin();
+  if (!admin) throw new Error('Supabase admin not configured');
+
+  const { data, error } = await admin
+    .from('ai_usage_events')
+    .select('user_id, anonymous_ip, route, model, prompt_tokens, completion_tokens, total_tokens, created_at')
+    .gte('created_at', since)
+    .lte('created_at', until)
+    .order('created_at', { ascending: false })
+    .limit(20000);
+
+  if (error) {
+    if (/42P01|could not find the table|does not exist/i.test(error.message)) {
+      return { totalTokens: 0, promptTokens: 0, completionTokens: 0, totalCalls: 0, avgTokensPerCall: 0, uniqueUsers: 0, avgTokensPerUser: 0, byRoute: [], byUser: [], byDay: [], byModel: [] };
+    }
+    throw new Error(error.message);
+  }
+
+  const rows = (data || []) as Array<{
+    user_id: string | null;
+    anonymous_ip: string | null;
+    route: string;
+    model: string;
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+    created_at: string | null;
+  }>;
+
+  let totalTokens = 0;
+  let promptTokens = 0;
+  let completionTokens = 0;
+  const routeMap = new Map<string, { tokens: number; calls: number; promptTokens: number; completionTokens: number }>();
+  const userMap = new Map<string, { tokens: number; calls: number }>();
+  const dayMap = new Map<string, { tokens: number; calls: number }>();
+  const modelMap = new Map<string, { tokens: number; calls: number }>();
+  const userSet = new Set<string>();
+
+  for (const row of rows) {
+    const t = row.total_tokens || 0;
+    const pt = row.prompt_tokens || 0;
+    const ct = row.completion_tokens || 0;
+    totalTokens += t;
+    promptTokens += pt;
+    completionTokens += ct;
+
+    const route = row.route || 'unknown';
+    const routeEntry = routeMap.get(route) || { tokens: 0, calls: 0, promptTokens: 0, completionTokens: 0 };
+    routeEntry.tokens += t;
+    routeEntry.calls += 1;
+    routeEntry.promptTokens += pt;
+    routeEntry.completionTokens += ct;
+    routeMap.set(route, routeEntry);
+
+    const userKey = row.user_id ? `user:${row.user_id.slice(0, 8)}` : row.anonymous_ip ? `ip:${row.anonymous_ip.slice(-8)}` : 'anonymous';
+    userSet.add(userKey);
+    const userEntry = userMap.get(userKey) || { tokens: 0, calls: 0 };
+    userEntry.tokens += t;
+    userEntry.calls += 1;
+    userMap.set(userKey, userEntry);
+
+    if (row.created_at) {
+      const day = row.created_at.slice(0, 10);
+      const dayEntry = dayMap.get(day) || { tokens: 0, calls: 0 };
+      dayEntry.tokens += t;
+      dayEntry.calls += 1;
+      dayMap.set(day, dayEntry);
+    }
+
+    const model = row.model || 'unknown';
+    const modelEntry = modelMap.get(model) || { tokens: 0, calls: 0 };
+    modelEntry.tokens += t;
+    modelEntry.calls += 1;
+    modelMap.set(model, modelEntry);
+  }
+
+  const uniqueUsers = userSet.size;
+
+  return {
+    totalTokens,
+    promptTokens,
+    completionTokens,
+    totalCalls: rows.length,
+    avgTokensPerCall: rows.length > 0 ? Math.round(totalTokens / rows.length) : 0,
+    uniqueUsers,
+    avgTokensPerUser: uniqueUsers > 0 ? Math.round(totalTokens / uniqueUsers) : 0,
+    byRoute: [...routeMap.entries()]
+      .map(([route, v]) => ({ route, ...v }))
+      .sort((a, b) => b.tokens - a.tokens),
+    byUser: [...userMap.entries()]
+      .map(([userKey, v]) => ({ userKey, ...v }))
+      .sort((a, b) => b.tokens - a.tokens)
+      .slice(0, 10),
+    byDay: [...dayMap.entries()]
+      .map(([date, v]) => ({ date, ...v }))
+      .sort((a, b) => a.date.localeCompare(b.date)),
+    byModel: [...modelMap.entries()]
+      .map(([model, v]) => ({ model, ...v }))
+      .sort((a, b) => b.tokens - a.tokens),
+  };
+}

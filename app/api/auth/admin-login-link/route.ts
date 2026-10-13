@@ -43,10 +43,57 @@ export async function POST(req: Request) {
     }
 
     if (process.env.NODE_ENV === 'development') {
+      // 开发环境：仍然尝试发送邮件，让管理员可以测试完整邮箱链路；
+      // 仅在邮件服务连接失败时回落到本机预览会话。
+      const redirectOrigin = getRequestOrigin(req);
+      const redirectTo = redirectOrigin
+        ? `${redirectOrigin}/auth/callback?${new URLSearchParams({
+            next: '/admin',
+            terms_accepted: '1',
+            training_consent: '1',
+            policy_version: 'v2026-05',
+          }).toString()}`
+        : null;
+
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const supabasePublishableKey =
+        process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+      if (supabaseUrl && supabasePublishableKey && redirectTo) {
+        try {
+          const supabase = createClient(supabaseUrl, supabasePublishableKey, {
+            auth: { autoRefreshToken: false, persistSession: false },
+          });
+          const { error: otpError } = await supabase.auth.signInWithOtp({
+            email,
+            options: { shouldCreateUser: true, emailRedirectTo: redirectTo },
+          });
+          if (!otpError) {
+            return NextResponse.json({
+              ok: true,
+              mode: 'email_sent',
+              message: '登录链接已发送，请去管理员邮箱（含垃圾邮件箱）查看。',
+            });
+          }
+          // OTP 调用返回错误（如 rate limit / 邮箱未配置），继续走到下面的本机回落
+          const otpMessage = /rate limit|too many/i.test(otpError.message)
+            ? '发送太频繁了，请稍等一会儿再试。'
+            : otpError.message;
+          // 如果是限流类错误，直接返回，不再回落本机会话
+          if (/rate limit|too many/i.test(otpError.message)) {
+            return NextResponse.json({ error: otpMessage }, { status: 429 });
+          }
+        } catch {
+          // 网络异常，继续走到本机回落
+        }
+      }
+
+      // 回落：本机管理员预览会话（仅在邮件链路不可用时启用）
       const response = NextResponse.json({
         ok: true,
         mode: 'local_admin_session',
-        message: '本地管理员预览会话已启用，正在刷新后台。',
+        message: '本地邮件服务暂不可用，已启用本机管理员预览会话。如需测试邮箱链路，请确认 Supabase 环境变量与回调地址已配置。',
       });
       response.cookies.set('local_admin_email', email, {
         httpOnly: true,
@@ -62,7 +109,7 @@ export async function POST(req: Request) {
       process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     if (!supabaseUrl || !supabasePublishableKey) {
-      return NextResponse.json({ error: '登录服务环境变量未配置完整。' }, { status: 500 });
+      return NextResponse.json({ error: '登录服务环境变量未配置完整：缺少 NEXT_PUBLIC_SUPABASE_URL 或 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY。' }, { status: 500 });
     }
 
     const redirectOrigin = getRequestOrigin(req);
@@ -99,7 +146,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: message }, { status: 400 });
     }
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({
+      ok: true,
+      mode: 'email_sent',
+      message: '登录链接已发送，请去管理员邮箱（含垃圾邮件箱）查看。',
+    });
   } catch (error) {
     const rawMessage = error instanceof Error ? error.message : '';
     if (

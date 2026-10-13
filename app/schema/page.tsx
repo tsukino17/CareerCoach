@@ -266,7 +266,7 @@ export default function TestDataPage() {
   const preview = useMemo(() => buildPathMapPreview(selectedCase.report), [selectedCase]);
   const headlineRoles = selectedCase.report.target_roles || [];
   const sampleHighlights = selectedCase.report.superpowers
-    .map((item) => (typeof item === 'string' ? item : item.name))
+    .map((item: any) => (typeof item === 'string' ? item : item.name))
     .slice(0, 3);
 
   useEffect(() => {
@@ -719,7 +719,7 @@ export default function TestDataPage() {
               subtitle="第一步不是岗位匹配，而是先帮助用户把模糊焦虑说清楚"
             >
               <div className="grid gap-3 md:grid-cols-2">
-                {selectedCase.pitchMessages.map((item) => (
+                {selectedCase.pitchMessages.map((item: { id: string; role: string; content: string }) => (
                     <div
                       key={item.id}
                       className={cn(
@@ -753,14 +753,14 @@ export default function TestDataPage() {
                     这一步的关键，不是给用户贴一个岗位标签，而是把原本零散、模糊、难以自我命名的能力结构提炼出来，让用户第一次清楚地看见“自己到底擅长什么、为什么总在某类问题上更敏锐”。
                   </p>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    {sampleHighlights.map((item) => (
+                    {sampleHighlights.map((item: string) => (
                       <span key={item} className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
                         {item}
                       </span>
                     ))}
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    {selectedCase.report.skills.map((skill) => (
+                    {selectedCase.report.skills.map((skill: string) => (
                       <span key={skill} className="rounded-full bg-sky-50 px-3 py-1 text-xs font-medium text-sky-700">
                         {skill}
                       </span>

@@ -581,6 +581,9 @@ function buildStorySignals({
   const hasAction = records.length > 0;
   const hasRhythm = records.length >= 4 || memory.length >= 3;
 
+  const latestRecord = records[records.length - 1] || null;
+  const latestMemory = [...memory].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))[0] || null;
+
   const currentStage = !hasReport ? 0 : !hasVision ? 1 : !hasAction ? 2 : !hasRhythm ? 3 : 4;
   const stages = [
     { title: '看见自己', detail: '通过天赋对话和报告，先把自己说清楚。', active: currentStage === 0, complete: currentStage > 0 || hasReport },
@@ -633,9 +636,9 @@ function buildStorySignals({
           : '先完成一次天赋对话和报告';
 
   const nextChapterBody = hasRhythm
-    ? recentMemory?.nextStep || '现在最值得做的是，把最近反复出现的主题拿去对应真实案例、岗位或用户线索，让判断更落地。'
+    ? latestMemory?.nextStep || '现在最值得做的是，把最近反复出现的主题拿去对应真实案例、岗位或用户线索，让判断更落地。'
     : hasAction
-      ? recentMemory?.nextStep || recentRecord?.nextStep || '先把最近反复出现的一步动作稳定下来，不用急着铺得太开。'
+      ? latestMemory?.nextStep || latestRecord?.nextStep || '先把最近反复出现的一步动作稳定下来，不用急着铺得太开。'
       : hasVision
         ? '愿景已经有了，下一步更值得做的是去现实路径地图或咨询工具箱，把“理想中的自己”翻译成真实职业世界。'
         : hasReport

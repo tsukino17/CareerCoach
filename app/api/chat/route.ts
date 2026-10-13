@@ -1,5 +1,6 @@
 import { streamText, tool } from 'ai';
 import { z } from 'zod';
+import { checkChatGuard } from '@/lib/chat-guard';
 import { COACH_MESSAGE_FORMATTING_RULES } from '@/lib/coach-message-formatting';
 import { GENTLE_BREEZE_V4_CHAT_PROMPT } from '@/lib/prompt-versions';
 import { checkRateLimitDistributed, getClientIp, normalizeMessages, rateLimitResponse } from '@/lib/rate-limit';
@@ -37,6 +38,22 @@ export async function POST(req: Request) {
         headers: { 'Content-Type': 'application/json' },
       });
     }
+
+    // 前置守门员：明显越狱 / 模型探查 / 广告刷屏 / 重复内容 → 短路返回标准化教练引导，不消耗 LLM
+    const guard = checkChatGuard(chatMessages);
+    if (guard.blocked && guard.reply) {
+      // 按 Vercel AI SDK data stream 协议返回：0:"text chunk"\n + 8:[finish]\n
+      const textChunk = `0:${JSON.stringify(guard.reply)}\n`;
+      const finishChunk = `8:[{"finishReason":"stop","usage":{"promptTokens":0,"completionTokens":0}}]\n`;
+      return new Response(textChunk + finishChunk, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'X-Vercel-AI-Data-Stream': 'v1',
+        },
+      });
+    }
+
     const llm = createLlmClient();
     if (!llm) {
       return new Response(JSON.stringify({ error: 'Missing model API key' }), {

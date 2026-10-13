@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/admin-auth';
 import { isAllowedOrigin } from '@/lib/request-security';
+import { getAiUsageAdminStats, type AiUsageAdminStats } from '@/lib/token-usage';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -199,16 +200,35 @@ export async function GET(req: Request) {
     const range = getRange(req);
     const siteScope = getSiteScope(req);
 
-    const { data: eventsData, error: eventsError } = await supabaseAdmin
-      .from('analytics_events')
-      .select('event_name, page, step, status, session_id, user_id, metadata, user_agent, created_at')
-      .gte('created_at', range.since)
-      .lte('created_at', range.until)
-      .order('created_at', { ascending: false })
-      .limit(20000);
-    if (eventsError && !isSetupSchemaError(eventsError)) throw eventsError;
+    // 并行查询所有独立数据源，避免串行等待
+    const [eventsResult, profilesResult, messagesResult, aiUsageResult] = await Promise.all([
+      supabaseAdmin
+        .from('analytics_events')
+        .select('event_name, page, step, status, session_id, user_id, metadata, user_agent, created_at')
+        .gte('created_at', range.since)
+        .lte('created_at', range.until)
+        .order('created_at', { ascending: false })
+        .limit(20000),
+      supabaseAdmin
+        .from('user_profiles')
+        .select('user_id, created_at')
+        .gte('created_at', range.since)
+        .lte('created_at', range.until)
+        .order('created_at', { ascending: false })
+        .limit(5000),
+      supabaseAdmin
+        .from('messages')
+        .select('id, user_id, conversation_id, role, content, created_at')
+        .gte('created_at', range.since)
+        .lte('created_at', range.until)
+        .order('created_at', { ascending: false })
+        .limit(10000),
+      getAiUsageAdminStats(range.since, range.until).catch(() => null),
+    ]);
 
-    const allEvents = (eventsError ? [] : eventsData || []) as EventRow[];
+    const eventsError = eventsResult.error;
+    if (eventsError && !isSetupSchemaError(eventsError)) throw eventsError;
+    const allEvents = (eventsResult.error ? [] : eventsResult.data || []) as EventRow[];
     const events = siteScope === 'production'
       ? allEvents.filter(isProductionSiteEvent)
       : allEvents;
@@ -329,13 +349,8 @@ export async function GET(req: Request) {
       return { step, starts, drops, dropRate };
     });
 
-    const { data: profilesData, error: profilesError } = await supabaseAdmin
-      .from('user_profiles')
-      .select('user_id, created_at')
-      .gte('created_at', range.since)
-      .lte('created_at', range.until)
-      .order('created_at', { ascending: false })
-      .limit(5000);
+    const profilesError = profilesResult.error;
+    const profilesData = profilesResult.data;
     if (profilesError && !isSetupSchemaError(profilesError)) throw profilesError;
 
     const profiles = (profilesError ? [] : profilesData || []) as ProfileRow[];
@@ -386,7 +401,30 @@ export async function GET(req: Request) {
       pathMessages: number;
       actionsCompleted: number;
       lastAt: string | null;
+      // 详细维度
+      firstAt: string | null;
+      pageViews: number;
+      dwellMs: number;
+      firstPage: string | null;
+      lastPage: string | null;
+      entrySource: string;
+      stagesReached: Set<string>;
+      firstActionAt: string | null;
+      firstChatAt: string | null;
+      firstReportAt: string | null;
+      keyActions: Array<{ type: string; at: string | null; page: string | null }>;
     }>();
+    // 全局聚合：页面跳转路径、停留分布、入口/出口、阶段漏斗、首次行动耗时
+    const pageTransitionMap = new Map<string, number>();
+    const dwellBucketMap = new Map<string, number>();
+    const dropOffPageMap = new Map<string, number>();
+    const entryPageMap = new Map<string, number>();
+    const exitPageMap = new Map<string, number>();
+    const stageUserMap = new Map<string, Set<string>>();
+    const timeToFirstActionMsList: number[] = [];
+    // 每个访客上一次看到的 page_view（DESC 迭代中是较晚的一个，新事件是较早的）
+    const visitorPageViewLastMap = new Map<string, { page: string; at: string }>();
+
     for (const event of events) {
       const visitor = getVisitorKey(event);
       if (!visitor) continue;
@@ -402,41 +440,230 @@ export async function GET(req: Request) {
         pathMessages: 0,
         actionsCompleted: 0,
         lastAt: event.created_at,
+        firstAt: event.created_at,
+        pageViews: 0,
+        dwellMs: 0,
+        firstPage: null as string | null,
+        lastPage: null as string | null,
+        entrySource: 'direct',
+        stagesReached: new Set<string>(),
+        firstActionAt: null as string | null,
+        firstChatAt: null as string | null,
+        firstReportAt: null as string | null,
+        keyActions: [] as Array<{ type: string; at: string | null; page: string | null }>,
       };
       if (event.session_id) item.sessions.add(event.session_id);
-      if (event.created_at && (!item.lastAt || event.created_at > item.lastAt)) item.lastAt = event.created_at;
-      if (event.event_name === 'chat_message_sent' || (event.event_name === 'anonymous_chat_message' && event.metadata?.role === 'user')) item.chatTurns += 1;
-      if (event.event_name === 'report_generation_success') item.reportsGenerated += 1;
+      if (event.created_at) {
+        if (!item.lastAt || event.created_at > item.lastAt) item.lastAt = event.created_at;
+        if (!item.firstAt || event.created_at < item.firstAt) item.firstAt = event.created_at;
+      }
+      if (event.event_name === 'chat_message_sent' || (event.event_name === 'anonymous_chat_message' && event.metadata?.role === 'user')) {
+        item.chatTurns += 1;
+        item.stagesReached.add('chat');
+        stageUserMap.set('chat', (stageUserMap.get('chat') || new Set<string>()).add(visitor));
+        if (!item.firstChatAt || (event.created_at && event.created_at < item.firstChatAt)) item.firstChatAt = event.created_at;
+        if (!item.firstActionAt && event.created_at) {
+          item.firstActionAt = event.created_at;
+          item.keyActions.push({ type: 'first_chat', at: event.created_at, page: event.page });
+        }
+      }
+      if (event.event_name === 'report_generation_success') {
+        item.reportsGenerated += 1;
+        item.stagesReached.add('report');
+        stageUserMap.set('report', (stageUserMap.get('report') || new Set<string>()).add(visitor));
+        if (!item.firstReportAt || (event.created_at && event.created_at < item.firstReportAt)) item.firstReportAt = event.created_at;
+        if (item.firstChatAt && event.created_at) {
+          // 已经设置过 timeToFirstAction 时跳过
+        }
+        if (!item.firstActionAt && event.created_at) {
+          item.firstActionAt = event.created_at;
+          item.keyActions.push({ type: 'first_report', at: event.created_at, page: event.page });
+        }
+      }
       if (event.event_name === 'report_viewed') item.reportViews += 1;
       if (event.event_name === 'report_engagement') item.reportEngagementMs += asNumber(event.metadata?.durationMs);
       if (event.event_name === 'report_shared' || event.event_name === 'report_image_saved') item.shares += 1;
-      if (event.event_name === 'path_chat_message_sent') item.pathMessages += 1;
-      if (event.event_name === 'action_completed') item.actionsCompleted += 1;
+      if (event.event_name === 'path_chat_message_sent' || event.event_name === 'path_opened') {
+        if (event.event_name === 'path_chat_message_sent') item.pathMessages += 1;
+        item.stagesReached.add('path');
+        stageUserMap.set('path', (stageUserMap.get('path') || new Set<string>()).add(visitor));
+        if (!item.firstActionAt && event.created_at) {
+          item.firstActionAt = event.created_at;
+          item.keyActions.push({ type: 'first_path', at: event.created_at, page: event.page });
+        }
+      }
+      if (event.event_name === 'action_completed') {
+        item.actionsCompleted += 1;
+        item.stagesReached.add('action');
+        stageUserMap.set('action', (stageUserMap.get('action') || new Set<string>()).add(visitor));
+        if (!item.firstActionAt && event.created_at) {
+          item.firstActionAt = event.created_at;
+          item.keyActions.push({ type: 'first_action', at: event.created_at, page: event.page });
+        }
+      }
+      // page_view：构建每个访客的页面序列、入口/出口、页面跳转图
+      if (event.event_name === 'page_view' && event.created_at) {
+        item.pageViews += 1;
+        item.stagesReached.add('visit');
+        stageUserMap.set('visit', (stageUserMap.get('visit') || new Set<string>()).add(visitor));
+        // 由于 events 是 DESC 排序，先看到的是较晚的事件
+        // lastPage = 首次看到的（最晚的）；firstPage = 最后看到的（最早的）
+        if (!item.lastPage) {
+          item.lastPage = event.page || 'unknown';
+          // lastPage 也即 dropOffPage
+          if (event.page) dropOffPageMap.set(event.page, (dropOffPageMap.get(event.page) || 0) + 1);
+        }
+        item.firstPage = event.page || 'unknown';
+        // 入口页：firstPage 是 DESC 迭代里最后一次赋值的（即最早的 page_view）
+        // 出口页：lastPage 是 DESC 迭代里第一次赋值的（即最晚的 page_view）
+        const prev = visitorPageViewLastMap.get(visitor);
+        if (prev && event.created_at < prev.at) {
+          // 当前事件较早，prev 较晚 → 跳转方向 event.page → prev.page
+          const from = event.page || 'unknown';
+          const to = prev.page;
+          const key = `${from}→${to}`;
+          pageTransitionMap.set(key, (pageTransitionMap.get(key) || 0) + 1);
+        }
+        visitorPageViewLastMap.set(visitor, { page: event.page || 'unknown', at: event.created_at });
+        if (!item.entrySource || item.entrySource === 'direct') {
+          const src = getTextValue(event.metadata?.trafficSource, 'direct');
+          if (src && src !== 'direct') item.entrySource = src;
+        }
+      }
+      // page_engagement：累计停留时长，分桶
+      if (event.event_name === 'page_engagement') {
+        const durationMs = asNumber(event.metadata?.durationMs);
+        item.dwellMs += durationMs;
+        const bucket = durationMs < 10000 ? '<10秒'
+          : durationMs < 30000 ? '10-30秒'
+          : durationMs < 60000 ? '30-60秒'
+          : durationMs < 180000 ? '1-3分钟'
+          : durationMs < 600000 ? '3-10分钟'
+          : '10分钟+';
+        dwellBucketMap.set(bucket, (dwellBucketMap.get(bucket) || 0) + 1);
+      }
       journeyMap.set(visitor, item);
     }
+
+    // 入口/出口页统计（基于每个访客的 firstPage/lastPage）
+    for (const item of journeyMap.values()) {
+      if (item.firstPage) entryPageMap.set(item.firstPage, (entryPageMap.get(item.firstPage) || 0) + 1);
+      if (item.lastPage) exitPageMap.set(item.lastPage, (exitPageMap.get(item.lastPage) || 0) + 1);
+    }
+
     const userJourneys = Array.from(journeyMap.values())
       .sort((a, b) => String(b.lastAt).localeCompare(String(a.lastAt)))
       .slice(0, 100)
-      .map((item) => ({
-        visitor: item.userId ? `user:${item.userId.slice(0, 8)}` : `anon:${item.visitor.slice(-8)}`,
-        sessions: item.sessions.size,
-        chatTurns: item.chatTurns,
-        reportsGenerated: item.reportsGenerated,
-        reportViews: item.reportViews,
-        reportEngagementMs: item.reportEngagementMs,
-        shares: item.shares,
-        pathMessages: item.pathMessages,
-        actionsCompleted: item.actionsCompleted,
-        lastAt: item.lastAt,
-      }));
+      .map((item) => {
+        const timeToFirstActionMs = item.firstActionAt && item.firstAt
+          ? Math.max(0, new Date(item.firstActionAt).getTime() - new Date(item.firstAt).getTime())
+          : null;
+        if (timeToFirstActionMs !== null && timeToFirstActionMs >= 0) timeToFirstActionMsList.push(timeToFirstActionMs);
+        const timeFromChatToReportMs = item.firstChatAt && item.firstReportAt
+          ? Math.max(0, new Date(item.firstReportAt).getTime() - new Date(item.firstChatAt).getTime())
+          : null;
+        return {
+          visitor: item.userId ? `user:${item.userId.slice(0, 8)}` : `anon:${item.visitor.slice(-8)}`,
+          sessions: item.sessions.size,
+          chatTurns: item.chatTurns,
+          reportsGenerated: item.reportsGenerated,
+          reportViews: item.reportViews,
+          reportEngagementMs: item.reportEngagementMs,
+          shares: item.shares,
+          pathMessages: item.pathMessages,
+          actionsCompleted: item.actionsCompleted,
+          lastAt: item.lastAt,
+          firstAt: item.firstAt,
+          pageViews: item.pageViews,
+          dwellMs: item.dwellMs,
+          avgDwellMs: item.pageViews > 0 ? Math.round(item.dwellMs / item.pageViews) : 0,
+          firstPage: item.firstPage,
+          lastPage: item.lastPage,
+          entrySource: item.entrySource,
+          stagesReached: Array.from(item.stagesReached),
+          dropOffPage: item.lastPage,
+          timeToFirstActionMs,
+          timeFromChatToReportMs,
+          keyActions: item.keyActions.slice(0, 10),
+        };
+      });
 
-    const { data: messagesData, error: messagesError } = await supabaseAdmin
-      .from('messages')
-      .select('id, user_id, conversation_id, role, content, created_at')
-      .gte('created_at', range.since)
-      .lte('created_at', range.until)
-      .order('created_at', { ascending: false })
-      .limit(10000);
+    // 全局旅程聚合
+    const totalVisitorsForJourney = journeyMap.size || 1;
+    const pageTransitions = Array.from(pageTransitionMap.entries())
+      .map(([key, count]) => {
+        const [from, to] = key.split('→');
+        return { from: from || 'unknown', to: to || 'unknown', count };
+      })
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 30);
+    const dwellOrder = ['<10秒', '10-30秒', '30-60秒', '1-3分钟', '3-10分钟', '10分钟+'];
+    const dwellDistribution = dwellOrder
+      .filter((bucket) => dwellBucketMap.has(bucket))
+      .map((bucket) => ({ bucket, count: dwellBucketMap.get(bucket) || 0 }));
+    const dropOffPages = Array.from(dropOffPageMap.entries())
+      .map(([page, count]) => ({ page, count, rate: Number(((count / totalVisitorsForJourney) * 100).toFixed(1)) }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 15);
+    const stageOrder = ['visit', 'chat', 'report', 'path', 'action'];
+    const stageLabels: Record<string, string> = {
+      visit: '访问页面',
+      chat: '发起对话',
+      report: '生成报告',
+      path: '进入现实路径',
+      action: '完成行动',
+    };
+    const stageFunnel = stageOrder.map((stage) => {
+      const users = stageUserMap.get(stage)?.size || 0;
+      return {
+        stage: stageLabels[stage] || stage,
+        users,
+        rate: totalVisitorsForJourney > 0 ? Number(((users / totalVisitorsForJourney) * 100).toFixed(1)) : 0,
+      };
+    });
+    const entryPages = Array.from(entryPageMap.entries())
+      .map(([page, count]) => ({ page, count, rate: Number(((count / totalVisitorsForJourney) * 100).toFixed(1)) }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 15);
+    const exitPages = Array.from(exitPageMap.entries())
+      .map(([page, count]) => ({ page, count, rate: Number(((count / totalVisitorsForJourney) * 100).toFixed(1)) }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 15);
+    const sortedTimes = timeToFirstActionMsList.slice().sort((a, b) => a - b);
+    const medianMs = sortedTimes.length > 0 ? sortedTimes[Math.floor(sortedTimes.length / 2)] : 0;
+    const timeBuckets = [
+      { label: '<30秒', test: (ms: number) => ms < 30000 },
+      { label: '30秒-2分钟', test: (ms: number) => ms >= 30000 && ms < 120000 },
+      { label: '2-10分钟', test: (ms: number) => ms >= 120000 && ms < 600000 },
+      { label: '10-30分钟', test: (ms: number) => ms >= 600000 && ms < 1800000 },
+      { label: '30分钟+', test: (ms: number) => ms >= 1800000 },
+    ];
+    const timeBucketsResult = timeBuckets.map((bucket) => ({
+      bucket: bucket.label,
+      count: sortedTimes.filter(bucket.test).length,
+    }));
+    const journeyAggregates = {
+      pageTransitions,
+      dwellDistribution,
+      dropOffPages,
+      stageFunnel,
+      entryPages,
+      exitPages,
+      timeToFirstAction: {
+        buckets: timeBucketsResult,
+        medianMs,
+        sampleSize: sortedTimes.length,
+      },
+      visitorLifecycle: {
+        newVisitors: journeyMap.size - repeatVisitors,
+        returningVisitors: repeatVisitors,
+        engagedVisitors: Array.from(journeyMap.values()).filter((item) => item.chatTurns > 0 || item.pathMessages > 0).length,
+        convertedVisitors: Array.from(journeyMap.values()).filter((item) => item.reportsGenerated > 0 || item.actionsCompleted > 0).length,
+      },
+    };
+
+    const messagesError = messagesResult.error;
+    const messagesData = messagesResult.data;
     if (messagesError && !isSetupSchemaError(messagesError)) throw messagesError;
 
     const messages = (messagesError ? [] : messagesData || []) as MessageRow[];
@@ -532,10 +759,75 @@ export async function GET(req: Request) {
       .slice(0, 80)
       .map(([text, value]) => ({ text, value }));
 
+    // AI Token 用量统计（已在上方并行查询）
+    const aiUsage: AiUsageAdminStats | null = aiUsageResult;
+
+    // 对话深度分析：按 conversation_id 聚合消息数，统计分布、首条意图、流失会话
+    const conversationMessageMap = new Map<string, { messages: MessageRow[]; firstUserMessage: string | null }>();
+    for (const m of insightMessages) {
+      const cid = m.conversation_id || 'unknown';
+      const entry = conversationMessageMap.get(cid) || { messages: [], firstUserMessage: null as string | null };
+      entry.messages.push(m);
+      if (entry.firstUserMessage === null && m.role === 'user' && m.content) {
+        entry.firstUserMessage = m.content;
+      }
+      conversationMessageMap.set(cid, entry);
+    }
+    const totalConversations = conversationMessageMap.size;
+    const depthBucketsMap = new Map<string, number>([
+      ['仅1条消息', 0],
+      ['2-3条', 0],
+      ['4-6条', 0],
+      ['7-10条', 0],
+      ['11条以上', 0],
+    ]);
+    const firstIntentMap = new Map<string, number>();
+    let dropOffConversations = 0;
+    let singleMessageConversations = 0;
+    let multiTurnConversations = 0;
+    for (const entry of conversationMessageMap.values()) {
+      const total = entry.messages.length;
+      const userMsgs = entry.messages.filter((m) => m.role === 'user').length;
+      const assistantMsgs = entry.messages.filter((m) => m.role === 'assistant').length;
+      if (total <= 1) depthBucketsMap.set('仅1条消息', (depthBucketsMap.get('仅1条消息') || 0) + 1);
+      else if (total <= 3) depthBucketsMap.set('2-3条', (depthBucketsMap.get('2-3条') || 0) + 1);
+      else if (total <= 6) depthBucketsMap.set('4-6条', (depthBucketsMap.get('4-6条') || 0) + 1);
+      else if (total <= 10) depthBucketsMap.set('7-10条', (depthBucketsMap.get('7-10条') || 0) + 1);
+      else depthBucketsMap.set('11条以上', (depthBucketsMap.get('11条以上') || 0) + 1);
+      if (total > 1) multiTurnConversations += 1;
+      else singleMessageConversations += 1;
+      // 流失会话：用户提问但 AI 未回复，或用户只发1条消息就离开
+      if (userMsgs > 0 && assistantMsgs === 0) dropOffConversations += 1;
+      else if (total === 1 && userMsgs === 1) dropOffConversations += 1;
+      if (entry.firstUserMessage) {
+        addCount(firstIntentMap, categorizeInput(entry.firstUserMessage));
+      }
+    }
+    const conversationAnalysis = {
+      depthBuckets: Array.from(depthBucketsMap.entries()).map(([bucket, count]) => ({
+        bucket,
+        count,
+        rate: totalConversations > 0 ? Number(((count / totalConversations) * 100).toFixed(1)) : 0,
+      })),
+      firstIntentCategories: Array.from(firstIntentMap.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .map(([name, count]) => ({ name, count })),
+      dropOffConversations,
+      dropOffRate: totalConversations > 0 ? Number(((dropOffConversations / totalConversations) * 100).toFixed(1)) : 0,
+      totalConversations,
+      avgMessagesPerConversation: totalConversations > 0 ? Number((insightMessages.length / totalConversations).toFixed(1)) : 0,
+      singleMessageConversations,
+      multiTurnConversations,
+    };
+
     return NextResponse.json({
       ok: true,
       range,
       siteScope,
+      aiUsage,
+      journeyAggregates,
+      conversationAnalysis,
       dailyVisits,
       dailyRegistrations,
       dailyMetrics: Array.from(new Set([

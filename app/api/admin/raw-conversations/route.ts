@@ -19,6 +19,7 @@ type MessageRow = {
   role: string;
   content: string;
   created_at: string;
+  sequence?: number;
 };
 
 type AnalyticsEventRow = {
@@ -48,6 +49,12 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const userId = (url.searchParams.get('user_id') || '').trim();
     const keyword = (url.searchParams.get('keyword') || '').trim();
+    const startDate = (url.searchParams.get('start_date') || '').trim();
+    const endDate = (url.searchParams.get('end_date') || '').trim();
+    const minMessagesRaw = Number(url.searchParams.get('min_messages') || 0);
+    const minMessages = Number.isFinite(minMessagesRaw) ? Math.max(0, minMessagesRaw) : 0;
+    const maxMessagesRaw = Number(url.searchParams.get('max_messages') || 0);
+    const maxMessages = Number.isFinite(maxMessagesRaw) ? Math.max(0, maxMessagesRaw) : 0;
     const limitRaw = Number(url.searchParams.get('limit') || 30);
     const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(100, limitRaw)) : 30;
 
@@ -59,6 +66,8 @@ export async function GET(req: Request) {
 
     if (userId) conversationsQuery = conversationsQuery.eq('user_id', userId);
     if (keyword) conversationsQuery = conversationsQuery.ilike('title', `%${keyword}%`);
+    if (startDate) conversationsQuery = conversationsQuery.gte('created_at', startDate);
+    if (endDate) conversationsQuery = conversationsQuery.lte('created_at', endDate + 'T23:59:59.999Z');
 
     const { data: conversationsData, error: conversationsError } = await conversationsQuery;
     const missingConversations = conversationsError && isMissingTableError(conversationsError);
@@ -102,7 +111,11 @@ export async function GET(req: Request) {
       ...conv,
       messages: map.get(conv.id) || [],
       message_count: (map.get(conv.id) || []).length,
-    }));
+    })).filter((conv) => {
+      if (minMessages > 0 && conv.message_count < minMessages) return false;
+      if (maxMessages > 0 && conv.message_count > maxMessages) return false;
+      return true;
+    });
 
     const { data: anonymousData, error: anonymousError } = await supabaseAdmin
       .from('analytics_events')
@@ -145,13 +158,28 @@ export async function GET(req: Request) {
         conversation_id: id,
         role: asText(event.metadata?.role) || 'unknown',
         content,
+        sequence: typeof event.metadata?.sequence === 'number' ? event.metadata.sequence : 0,
         created_at: createdAt,
       });
       anonymousMap.set(id, conversation);
     }
 
     const anonymousConversations = Array.from(anonymousMap.values())
-      .map((conv) => ({ ...conv, message_count: conv.messages.length }))
+      .map((conv) => ({
+        ...conv,
+        message_count: conv.messages.length,
+        messages: [...conv.messages].sort((a, b) => {
+          const seqA = (a as { sequence?: number }).sequence ?? 0;
+          const seqB = (b as { sequence?: number }).sequence ?? 0;
+          if (seqA !== seqB) return seqA - seqB;
+          return (a.created_at || '').localeCompare(b.created_at || '');
+        }),
+      }))
+      .filter((conv) => {
+        if (minMessages > 0 && conv.message_count < minMessages) return false;
+        if (maxMessages > 0 && conv.message_count > maxMessages) return false;
+        return true;
+      })
       .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
       .slice(0, limit);
 

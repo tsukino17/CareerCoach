@@ -7,6 +7,13 @@ const nextConfig = {
     ignoreBuildErrors: true,
   },
   async headers() {
+    const isDev = process.env.NODE_ENV === 'development';
+    const scriptSrc = isDev
+      ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:"
+      : "script-src 'self' 'unsafe-inline' https:";
+    const connectSources = isDev
+      ? "connect-src 'self' https://cxohlswsvgfuwhbbqzra.supabase.co https://dashscope.aliyuncs.com https://tokendance.space"
+      : "connect-src 'self' https://cxohlswsvgfuwhbbqzra.supabase.co https://dashscope.aliyuncs.com";
     const csp = [
       "default-src 'self'",
       "base-uri 'self'",
@@ -16,8 +23,8 @@ const nextConfig = {
       "img-src 'self' data: blob: https:",
       "font-src 'self' data: https:",
       "media-src 'self' data: blob: https:",
-      "connect-src 'self' https://cxohlswsvgfuwhbbqzra.supabase.co https://dashscope.aliyuncs.com",
-      "script-src 'self' 'unsafe-inline' https:",
+      connectSources,
+      scriptSrc,
       "style-src 'self' 'unsafe-inline' https:",
       "upgrade-insecure-requests",
     ].join('; ');

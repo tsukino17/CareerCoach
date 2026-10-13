@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { writeFile, mkdir, mkdtemp, unlink, rm } from 'fs/promises';
+import { writeFile, mkdir, mkdtemp, unlink, rm, copyFile } from 'fs/promises';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import { v4 as uuidv4 } from 'uuid';
@@ -48,7 +48,7 @@ async function probeDuration(filePath: string) {
   return Number.isFinite(duration) ? duration : 0;
 }
 
-async function withTempDir(prefix: string, fn: (dir: string) => Promise<string>) {
+async function withTempDir<T>(prefix: string, fn: (dir: string) => Promise<T>): Promise<T> {
   const dir = await mkdtemp(join(tmpdir(), prefix));
   try {
     return await fn(dir);
@@ -66,7 +66,7 @@ async function processAudio(filePath: string, fileExtension: string) {
   }
 
   return withTempDir('career-audio-trim-', async (workingDir) => {
-    const trimmedPath = join(workingDir, `trimmed.${fileExtension}`);
+    const tempTrimmedPath = join(workingDir, `trimmed.${fileExtension}`);
     const availableTail = Math.max(duration - MAX_CLONE_DURATION_SECONDS, 0);
     const trimStart = Math.min(TRIM_START_SECONDS, availableTail);
 
@@ -77,11 +77,14 @@ async function processAudio(filePath: string, fileExtension: string) {
       '-t', String(MAX_CLONE_DURATION_SECONDS),
       '-ac', '1',
       '-ar', '16000',
-      trimmedPath,
+      tempTrimmedPath,
     ]);
 
+    // 临时目录会在 withTempDir 结束时删除，必须把结果文件移到持久位置
+    const persistedPath = `${filePath}.trimmed.${fileExtension}`;
+    await copyFile(tempTrimmedPath, persistedPath);
     await unlink(filePath).catch(() => {});
-    return { filePath: trimmedPath, duration, trimmed: true };
+    return { filePath: persistedPath, duration, trimmed: true };
   });
 }
 
@@ -94,17 +97,20 @@ async function normalizeLargeAudio(filePath: string) {
   }
 
   return withTempDir('career-audio-normalize-', async (workingDir) => {
-    const normalizedPath = join(workingDir, 'normalized.mp3');
+    const tempNormalizedPath = join(workingDir, 'normalized.mp3');
     await runFFmpeg([
       '-y',
       '-i', filePath,
       '-ac', '1',
       '-ar', '16000',
       '-b:a', '48k',
-      normalizedPath,
+      tempNormalizedPath,
     ]);
+    // 临时目录会在 withTempDir 结束时删除，必须把结果文件移到持久位置
+    const persistedPath = `${filePath}.normalized.mp3`;
+    await copyFile(tempNormalizedPath, persistedPath);
     await unlink(filePath).catch(() => {});
-    return normalizedPath;
+    return persistedPath;
   });
 }
 

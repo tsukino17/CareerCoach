@@ -1,5 +1,15 @@
 # AI 助手合作日志
 
+## 2026-10-13（教练笔记 + 督导工作室 + 未深度体验用户分析上线）
+
+- 数据结构为双教练打通预留：`coach_notes`/`coach_reflections`/`coach_studio_messages` 三张表全部新增 `coach_type` 字段（`talent` 天赋教练 / `action` 行动教练，行动教练触发条件后期再设），同一对话可各自生成笔记与反思。
+- 教练笔记自动生成 `POST /api/coach/notes`：用户重新打开对话时由 `chat-content.tsx` 触发（不在 handleFinish 触发，避免对话进行中误触）。服务端校验「消息数>10 + 最后一条距今>3h + 尚无该 coach_type 笔记」，有用户报告则将报告摘要喂给 LLM 并写入 `note_json.report_integration`，无报告也生成笔记。
+- 督导工作室 `GET/POST /api/admin/coach-studio`：教练作为 agent 基于最近 80 条笔记 + 60 段对话片段生成反思报告（缓存 6h，含 patterns/suggested_prompt_changes/overall_assessment）；管理员可与教练对话，所有读写均加 `coach_type='talent'` 过滤。
+- 原始对话页 `/admin/raw-conversations` 展开对话时拉取教练笔记，渲染 summary/user_state/key_topics/coaching_strategies/what_worked/what_didnt_work/follow_ups/sentiment/report_integration，笔记缺失时显示原因（消息不足/仍在 3h 内/未触发）。
+- 用户行为旅程页 `/admin/user-journey` 新增「未深度体验用户原因分析」面板：对消息数<10 的用户群做 LLM 流失原因分析（common_patterns/drop_off_reasons/common_topics_before_drop/coach_suggestion），与教练笔记分流——<10 条不生成笔记。
+- 侧边栏导航新增「督导工作室」入口（GraduationCap 图标）。
+- 验证：`npx tsc --noEmit` 零错误；本地 preview 重启后 `/admin/coach-studio`、`/admin/user-journey`、`/admin/raw-conversations` 均返回 200 且 CSS 与 page chunk 资源正常加载。三张新表需用户在 Supabase 执行建表 SQL 后数据流才能跑通。
+
 ## 2026-10-10（v4.5.6 发布上线 + Vercel 项目分裂修复）
 
 - 发布 v4.5.6（Model Gateway & Metering）：TokenDance 网关、AI 用量记账、个人中心用量卡片、周报 AI 用量板块。版本号经用户纠正从误定的 4.6.6 改为 4.5.6（4.5.5 顺延），并确认规则：版本号取值须问清用户决定。

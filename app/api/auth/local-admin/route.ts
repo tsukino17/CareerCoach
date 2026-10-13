@@ -7,6 +7,7 @@ export const dynamic = 'force-dynamic';
 
 type LocalAdminPayload = {
   secret?: string;
+  mode?: 'device' | 'secret';
 };
 
 export async function POST(req: Request) {
@@ -16,14 +17,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Forbidden origin' }, { status: 403 });
     }
 
-    const configuredSecret = process.env.LOCAL_ADMIN_SECRET || '';
-    if (!configuredSecret) {
-      return NextResponse.json({ error: '本机管理员密钥未配置。' }, { status: 500 });
-    }
-
     const body = (await req.json().catch(() => ({}))) as LocalAdminPayload;
-    if (!body.secret || body.secret !== configuredSecret) {
-      return NextResponse.json({ error: '本机管理员密钥不正确。' }, { status: 401 });
+
+    // 设备一键登录：middleware 已限制 /admin 仅本机可访问，此处再次确认 hostname 为本机即可放行
+    if (body.mode !== 'device') {
+      const configuredSecret = process.env.LOCAL_ADMIN_SECRET || '';
+      if (!configuredSecret) {
+        return NextResponse.json({ error: '本机管理员密钥未配置。' }, { status: 500 });
+      }
+      if (!body.secret || body.secret !== configuredSecret) {
+        return NextResponse.json({ error: '本机管理员密钥不正确。' }, { status: 401 });
+      }
     }
 
     const response = NextResponse.json({

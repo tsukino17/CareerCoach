@@ -31,3 +31,13 @@ ts-debug.log*
 # typescript
 *.tsbuildinfo
 .weekly-report-latest.txt
+.env*
+
+# supabase CLI temp artifacts
+supabase/.temp/
+supabase/.branches/
+
+# IDE / agent workspaces
+.trae/
+.idea/
+.vscode/

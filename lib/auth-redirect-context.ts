@@ -8,7 +8,7 @@ export type AuthRedirectContext = {
   policyVersion: string;
 };
 
-export function isSafeAuthNextPath(value: string | null | undefined) {
+export function isSafeAuthNextPath(value: string | null | undefined): value is string {
   return Boolean(value && value.startsWith('/') && !value.startsWith('//') && !value.includes('\\'));
 }
 

@@ -495,7 +495,7 @@ function ResourceMapPanel({
                 ))}
               </div>
               <Link
-                href={`/coach/action?resource=${encodeURIComponent(activeResource)}`}
+                href={`/coach/action?resource=${encodeURIComponent(activeResource ?? '')}`}
                 style={{
                   marginTop: 10,
                   display: 'inline-flex',
@@ -609,7 +609,7 @@ function readActionCoachRecords(): ActionCoachRecord[] {
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
     return parsed
-      .map((item) => {
+      .map((item): ActionCoachRecord | null => {
         const record = item as { content?: unknown; createdAt?: unknown; category?: unknown; mood?: unknown; summary?: unknown; resources?: unknown; nextStep?: unknown };
         if (typeof record.content !== 'string' || typeof record.createdAt !== 'string') return null;
         const category = typeof record.category === 'string' ? record.category : inferCategory(record.content);
@@ -623,7 +623,7 @@ function readActionCoachRecords(): ActionCoachRecord[] {
           nextStep: typeof record.nextStep === 'string' ? record.nextStep : inferNextStep(record.content, category),
         };
       })
-      .filter((item): item is ActionCoachRecord => Boolean(item))
+      .filter((item): item is ActionCoachRecord => item !== null)
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
   } catch {
     return [];

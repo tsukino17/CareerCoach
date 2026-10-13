@@ -237,16 +237,16 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
     const anonymousVisitorId = getOrCreateLocalId(ANONYMOUS_VISITOR_KEY, 'anon_visitor');
     const anonymousConversationId = getOrCreateLocalId(ANONYMOUS_CONVERSATION_KEY, 'anon_conv');
     const turnNumber = messages.filter((message) => message.role === 'user').length;
-    const events: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+    const events: Array<{ role: 'user' | 'assistant'; content: string; sequence: number }> = [];
     if (userMessage?.role === 'user' && typeof userMessage.content === 'string' && userMessage.content.trim()) {
-      events.push({ role: 'user', content: userMessage.content });
+      events.push({ role: 'user', content: userMessage.content, sequence: 0 });
     }
     if (assistantContent.trim()) {
-      events.push({ role: 'assistant', content: assistantContent });
+      events.push({ role: 'assistant', content: assistantContent, sequence: events.length });
     }
 
     for (const item of events) {
-      void trackEvent({
+      await trackEvent({
         eventName: 'anonymous_chat_message',
         page: '/chat',
         metadata: {
@@ -258,6 +258,7 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
           anonymousConversationId,
           conversationId: anonymousConversationId,
           turnNumber,
+          sequence: item.sequence,
         },
       });
     }
@@ -754,6 +755,34 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
     }
   }, [messages, isLoaded, currentConversationId]);
 
+  // 对话加载后尝试触发教练笔记生成（服务端校验：消息数>10 + 停止3h + 尚无笔记）
+  // 前端只负责"有 conversationId + 消息够多"就尝试，服务端做完整条件判断
+  // 用 localStorage 标记避免对同一对话重复触发
+  useEffect(() => {
+    if (!currentConversationId || !isLoaded || messages.length < 10) return;
+    if (typeof window === 'undefined') return;
+    const triedKey = `coach_note_tried_${currentConversationId}`;
+    if (window.localStorage.getItem(triedKey)) return;
+    window.localStorage.setItem(triedKey, '1');
+    let cancelled = false;
+    void (async () => {
+      try {
+        const headers = await authHeaders();
+        if (cancelled) return;
+        await fetch('/api/coach/notes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...headers },
+          body: JSON.stringify({ conversationId: currentConversationId }),
+        });
+      } catch {
+        // 静默失败：笔记生成是后台异步任务，失败不影响用户
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentConversationId, isLoaded, messages.length]);
+
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollIntoView({ behavior: 'smooth' });
@@ -964,7 +993,7 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
             <div className="flex items-center gap-3">
               <div className="flex flex-col">
                 <h1 className="text-lg font-medium tracking-tight text-foreground/80">EchoTalent</h1>
-                <span className="text-[10px] text-muted-foreground tracking-widest uppercase opacity-70">v4.5.6</span>
+                <span className="text-[10px] text-muted-foreground tracking-widest uppercase opacity-70">v4.5.7</span>
               </div>
             </div>
             <div className="flex items-center gap-1.5 sm:gap-2">

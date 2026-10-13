@@ -111,7 +111,7 @@ function normalizeReferenceCases(value: unknown) {
     .slice(0, 5);
 }
 
-function normalizeUserContext(value: unknown) {
+function normalizeUserContext(value: unknown): Record<string, string> {
   if (!value || typeof value !== 'object') return {};
   const record = value as Record<string, unknown>;
   return {
@@ -186,7 +186,7 @@ function normalizeReport(value: unknown, fallback: AnalysisReport): AnalysisRepo
     evidenceSources: evidenceSources
       .map((item) => {
         const record = item as { sourceType?: unknown; sourceName?: unknown; usedFor?: unknown; confidence?: unknown };
-        const confidence = record.confidence === '高' || record.confidence === '低' ? record.confidence : '中';
+        const confidence: '高' | '中' | '低' = record.confidence === '高' || record.confidence === '低' ? record.confidence : '中';
         return {
           sourceType: asString(record.sourceType, '模型推断').slice(0, 30),
           sourceName: asString(record.sourceName, '待补充来源').slice(0, 80),
