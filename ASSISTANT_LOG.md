@@ -8,6 +8,7 @@
 - **周报**：`lib/weekly-report.ts` 运营洞察新增路径转化、证据与意愿准备度三句；文本版与 HTML 版均新增「现实路径教练」板块（KPI 四宫格 + 阶段/证据明细表），并补充指标说明。
 - **站点标记修正**：`analytics-client` 统一附带 `metadata.host`，使后台与周报默认的「仅线上」口径能正确识别 echotalent.fun，本地事件不会混入。
 - 验证：`npx tsc --noEmit` 零错误；样例事件单测聚合结果正确；本地 `/admin` 与 `/api/admin/insights` 返回 200 且包含 `realityPath` 字段。
+- 发布：随 v4.5.8 推送 `release/v4.5.4`（commit `1c515e1`）并部署 Vercel 生产，`echotalent.fun` 已指向新部署；`/chat`、`/path` 均 200，`/chat` 角标为 v4.5.8。
 
 ## 2026-10-21（发布 v4.5.8 · Reality Path Coach · Three Steps）
 
