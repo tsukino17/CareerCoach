@@ -181,6 +181,7 @@ export default function UserCenterPage() {
             </div>
           </section>
 
+          {/* 现实路径教练卡片暂隐藏，待后续面板完善后再启用
           <section
             style={{
               borderRadius: 18,
@@ -218,7 +219,7 @@ export default function UserCenterPage() {
               </div>
 
               <div style={{ marginTop: 14, color: 'rgba(15,23,42,0.62)', lineHeight: 1.7, fontSize: 14 }}>
-                我们不会用“完成/未完成”去评判一天。只记录你已经做过的，并把它轻轻联结回你的理想身份。
+                我们不会用"完成/未完成"去评判一天。只记录你已经做过的，并把它轻轻联结回你的理想身份。
               </div>
 
               <div style={{ marginTop: 16, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
@@ -270,6 +271,7 @@ export default function UserCenterPage() {
               后续这里会增加面板：记录概览（事实/心情）、趋势（只呈现，不催促）、阶段洞察（行动力教练总结）。
             </div>
           </section>
+          */}
         </div>
       </div>
     </main>
@@ -407,16 +409,16 @@ function ActionIcon() {
   );
 }
 
-function CalendarIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-      <path d="M7 4v3M17 4v3M5 9h14" stroke="rgba(134,184,255,0.95)" strokeWidth="1.8" strokeLinecap="round" />
-      <path
-        d="M6 6h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z"
-        stroke="rgba(134,184,255,0.65)"
-        strokeWidth="1.6"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
+// function CalendarIcon() {
+//   return (
+//     <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+//       <path d="M7 4v3M17 4v3M5 9h14" stroke="rgba(134,184,255,0.95)" strokeWidth="1.8" strokeLinecap="round" />
+//       <path
+//         d="M6 6h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z"
+//         stroke="rgba(134,184,255,0.65)"
+//         strokeWidth="1.6"
+//         strokeLinejoin="round"
+//       />
+//     </svg>
+//   );
+// }

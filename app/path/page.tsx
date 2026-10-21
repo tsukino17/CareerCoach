@@ -2256,7 +2256,7 @@ export default function PathPage() {
   const [selectedExplorationRole, setSelectedExplorationRole] = useState('');
   const [explorationChecksByRole, setExplorationChecksByRole] = useState<Record<string, CareerExplorationCheckId[]>>({});
   // Phase A: 横向步骤条 + 当前 Step 主区域
-  const [currentStep, setCurrentStep] = useState<PathStep>(2);
+  const [currentStep, setCurrentStep] = useState<PathStep>(1);
   const [completedSteps, setCompletedSteps] = useState<PathStep[]>([]);
   const [viewingStep, setViewingStep] = useState<PathStep | null>(null); // null = 看当前 step
   const displayedStep: PathStep = viewingStep ?? currentStep;
