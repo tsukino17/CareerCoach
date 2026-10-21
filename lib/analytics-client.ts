@@ -63,6 +63,8 @@ export async function trackEvent(payload: TrackEventPayload) {
         metadata: {
           ...(payload.metadata || {}),
           anonymousVisitorId: visitorId,
+          // 站点标记：后台/周报默认只统计 echotalent.fun，本地事件不会混入线上口径
+          host: typeof window !== 'undefined' ? window.location.host : '',
         },
       }),
       keepalive: true,

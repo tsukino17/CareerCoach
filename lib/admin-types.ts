@@ -1,5 +1,7 @@
 // 管理后台共享类型：被所有 admin 页面和 insights API 引用
 
+import type { RealityPathStats } from '@/lib/path-analytics';
+
 export type DailyVisit = { date: string; count: number; visitors: number };
 export type DailyRegistration = { date: string; count: number };
 export type FunnelStep = { step: string; starts: number; drops: number; dropRate: number };
@@ -131,6 +133,7 @@ export type InsightsResponse = {
   range: { preset: string; startDate: string; endDate: string };
   siteScope?: 'production' | 'all';
   aiUsage?: AiUsageAdminStats | null;
+  realityPath?: RealityPathStats;
   journeyAggregates?: JourneyAggregates;
   conversationAnalysis?: ConversationAnalysis;
   dailyVisits: DailyVisit[];

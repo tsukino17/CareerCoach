@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/admin-auth';
 import { isAllowedOrigin } from '@/lib/request-security';
 import { getAiUsageAdminStats, type AiUsageAdminStats } from '@/lib/token-usage';
+import { computeRealityPathStats } from '@/lib/path-analytics';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -821,11 +822,15 @@ export async function GET(req: Request) {
       multiTurnConversations,
     };
 
+    // 现实路径教练：事件与对话数据均已进入 events（path_* + anonymous_chat_message@/path）
+    const realityPath = computeRealityPathStats(events as Parameters<typeof computeRealityPathStats>[0]);
+
     return NextResponse.json({
       ok: true,
       range,
       siteScope,
       aiUsage,
+      realityPath,
       journeyAggregates,
       conversationAnalysis,
       dailyVisits,

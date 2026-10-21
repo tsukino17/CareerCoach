@@ -657,6 +657,25 @@ function persistPathBoardSummary(board: PathBoardSummary) {
   window.localStorage.setItem(PATH_BOARD_SUMMARY_KEY, JSON.stringify(board));
 }
 
+// 现实路径对话 id：同一天连续使用归入同一场对话，归档或超过 6 小时后自动新建
+const PATH_ANALYTICS_CONVERSATION_KEY = 'career_path_analytics_conversation';
+function getPathAnalyticsConversationId(reset = false) {
+  if (typeof window === 'undefined') return 'server';
+  const now = Date.now();
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(PATH_ANALYTICS_CONVERSATION_KEY) || '{}') as { id?: string; at?: number };
+    if (!reset && raw.id && now - Number(raw.at || 0) < 6 * 60 * 60 * 1000) {
+      window.localStorage.setItem(PATH_ANALYTICS_CONVERSATION_KEY, JSON.stringify({ id: raw.id, at: now }));
+      return raw.id;
+    }
+  } catch {
+    // 本地存储损坏时直接新建
+  }
+  const id = `path_conv_${now}_${Math.random().toString(36).slice(2, 8)}`;
+  window.localStorage.setItem(PATH_ANALYTICS_CONVERSATION_KEY, JSON.stringify({ id, at: now }));
+  return id;
+}
+
 function PathModule({
   icon: Icon,
   title,
@@ -2248,6 +2267,8 @@ export default function PathPage() {
   const [demoPlaying, setDemoPlaying] = useState(false);
   const demoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 现实路径对话埋点序号（同一场对话内递增，供后台按顺序还原）
+  const pathAnalyticsSequenceRef = useRef(0);
   // 积木②交付形态：演示对话确认后同步（真实用户后续由教练确认流写入）
   const [confirmedDeliveryFormat, setConfirmedDeliveryFormat] = useState<DeliveryFormat | null>(null);
   // Step 2/3：选定主线快照与准备度（会话内状态，与证据卡一致不持久化）
@@ -2482,6 +2503,21 @@ export default function PathPage() {
     router.push(href);
   };
 
+  // 现实路径页访问埋点：每次进入记录一次（访客去重在统计侧完成）
+  useEffect(() => {
+    void trackEvent({
+      eventName: 'path_opened',
+      page: '/path',
+      status: 'success',
+      metadata: {
+        testMode: Boolean(activeTestPersona),
+        entry: typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('from') || 'direct' : 'direct',
+      },
+    });
+    // 仅在首次挂载时记录
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // 证据卡三出口确认：同步更新总览面板与对话内卡片副本
   const updateEvidenceCardStatus = (cardId: string, status: EvidenceCard['status'], userAmendment?: string) => {
     const applyUpdate = (card: EvidenceCard): EvidenceCard => ({
@@ -2497,6 +2533,18 @@ export default function PathPage() {
         evidenceCards: message.evidenceCards.map((card) => (card.id === cardId ? applyUpdate(card) : card)),
       };
     }));
+    const card = evidenceCards.find((item) => item.id === cardId);
+    void trackEvent({
+      eventName: 'path_evidence_confirmed',
+      page: '/path',
+      status,
+      metadata: {
+        capability: card?.capability || null,
+        hasArtifact: Boolean(card?.artifact),
+        pathTitle: selectedBrief?.pathTitle || null,
+        testMode: Boolean(activeTestPersona),
+      },
+    });
   };
 
   // 当前积木快照：报告提取看家本领（1-3 个）+ 画像行业赛道作利基 + 演示确认的交付形态覆盖
@@ -2525,6 +2573,16 @@ export default function PathPage() {
     if (step2Unlocked && currentStep === 1) {
       setCompletedSteps((prev) => (prev.includes(1) ? prev : ([...prev, 1] as PathStep[])));
       setCurrentStep(2);
+      void trackEvent({
+        eventName: 'path_step2_unlocked',
+        page: '/path',
+        status: 'success',
+        metadata: {
+          confirmedEvidence: evidenceCards.filter((card) => card.status === 'confirmed').length,
+          deliveryFormat: activeLegoProfile?.deliveryFormat || 'undecided',
+          testMode: Boolean(activeTestPersona),
+        },
+      });
     }
   }, [locked, step2Unlocked, currentStep]);
 
@@ -2537,6 +2595,12 @@ export default function PathPage() {
         return next.includes(2) ? next : ([...next, 2] as PathStep[]);
       });
       setCurrentStep(3);
+      void trackEvent({
+        eventName: 'path_step3_unlocked',
+        page: '/path',
+        status: 'success',
+        metadata: { readinessScore: readiness.score, testMode: Boolean(activeTestPersona) },
+      });
     }
   }, [locked, readiness, currentStep]);
 
@@ -2545,6 +2609,32 @@ export default function PathPage() {
   const activatePanel = (panelId: PanelId) => {
     setVisiblePanels((current) => (current.includes(panelId) ? current : [...current, panelId]));
     setExpandedPanels((current) => ({ ...current, [panelId]: true }));
+  };
+
+  // 现实路径对话埋点：逐条写入 anonymous_chat_message（page=/path），
+  // 后台「原始对话」与周报都能按对话 id 查看和统计
+  const logPathCoachTurn = (role: 'user' | 'assistant', content: string, step: PathStep) => {
+    const trimmed = content.trim();
+    if (!trimmed) return;
+    const conversationId = getPathAnalyticsConversationId();
+    const sequence = pathAnalyticsSequenceRef.current;
+    pathAnalyticsSequenceRef.current += 1;
+    void trackEvent({
+      eventName: 'anonymous_chat_message',
+      page: '/path',
+      metadata: {
+        role,
+        content: trimmed,
+        chars: trimmed.length,
+        coach: 'reality_path',
+        step,
+        anonymousConversationId: conversationId,
+        conversationId,
+        batchId: `path_${Math.floor(sequence / 2)}`,
+        sequence,
+        testMode: Boolean(activeTestPersona),
+      },
+    });
   };
 
   // 停止演示播放：清理计时器（resetPlaying=false 时保留播放状态，用于播放前的预清理）
@@ -2619,6 +2709,7 @@ export default function PathPage() {
           }
           setMessages((prev) => [...prev, ...parts]);
           played.push({ role: 'assistant', content: readinessParsed.cleanText || turn.content });
+          logPathCoachTurn('assistant', readinessParsed.cleanText || turn.content, currentStep);
           setIsCoachTyping(false);
           index += 1;
           demoTimerRef.current = setTimeout(step, 850);
@@ -2631,9 +2722,16 @@ export default function PathPage() {
             setTasks(nextTasks);
             savePathTasks(nextTasks);
             activatePanel('tasks');
+            void trackEvent({
+              eventName: 'path_micro_action_confirmed',
+              page: '/path',
+              status: 'success',
+              metadata: { taskCount: nextTasks.filter((task) => !task.completedAt).length, source: 'demo', testMode: true },
+            });
           }
           setMessages((prev) => [...prev, { role: 'user', content: turn.content }]);
           played.push({ role: 'user', content: turn.content });
+          logPathCoachTurn('user', turn.content, currentStep);
           index += 1;
           step();
         }, 650);
@@ -2663,6 +2761,16 @@ export default function PathPage() {
   const selectMainlinePath = (path: LegoPath) => {
     if (path.id === selectedBrief?.pathId) return;
     if (!step2Unlocked) {
+      void trackEvent({
+        eventName: 'path_mainline_blocked',
+        page: '/path',
+        status: 'blocked',
+        metadata: {
+          pathTitle: displayPathTitle(path.title),
+          confirmedEvidence: evidenceCards.filter((card) => card.status === 'confirmed').length,
+          deliveryFormat: activeLegoProfile?.deliveryFormat || 'undecided',
+        },
+      });
       if (ackTimerRef.current) clearTimeout(ackTimerRef.current);
       setIsCoachTyping(true);
       ackTimerRef.current = setTimeout(() => {
@@ -2679,6 +2787,18 @@ export default function PathPage() {
       pathTitle: displayPathTitle(path.title),
       requirementChecks: [],
       valueNotes: [],
+    });
+    void trackEvent({
+      eventName: 'path_mainline_selected',
+      page: '/path',
+      status: 'success',
+      metadata: {
+        pathId: path.id,
+        pathTitle: displayPathTitle(path.title),
+        quadrant: path.quadrant || null,
+        marketDensity: path.marketDensity,
+        testMode: Boolean(activeTestPersona),
+      },
     });
     setCompletedSteps((prev) => (prev.includes(1) ? prev : ([...prev, 1] as PathStep[])));
     setCurrentStep(2);
@@ -2698,12 +2818,21 @@ export default function PathPage() {
     if (!text || isCoachTyping) return;
     // 意愿三态捕捉：Step 2 对照期间用户对"还想做吗"的回答（轻量正则；教练对话仍是权威，误判无害）
     if (selectedBrief && selectedBrief.requirementChecks.length > 0 && !selectedBrief.willingness) {
-      if (/不想做|不适合我|还是算了|先不弄了/.test(text)) {
-        setSelectedBrief((prev) => (prev ? { ...prev, willingness: 'no' } : prev));
-      } else if (/想做|还想做|挺想做|愿意|可以试试|想试试|有兴趣/.test(text)) {
-        setSelectedBrief((prev) => (prev ? { ...prev, willingness: 'want' } : prev));
-      } else if (/观望|不确定|还没想好|再看看/.test(text)) {
-        setSelectedBrief((prev) => (prev ? { ...prev, willingness: 'unsure' } : prev));
+      const willingness = /不想做|不适合我|还是算了|先不弄了/.test(text)
+        ? 'no' as const
+        : /想做|还想做|挺想做|愿意|可以试试|想试试|有兴趣/.test(text)
+          ? 'want' as const
+          : /观望|不确定|还没想好|再看看/.test(text)
+            ? 'unsure' as const
+            : null;
+      if (willingness) {
+        setSelectedBrief((prev) => (prev ? { ...prev, willingness } : prev));
+        void trackEvent({
+          eventName: 'path_willingness_selected',
+          page: '/path',
+          status: willingness,
+          metadata: { pathTitle: selectedBrief.pathTitle, checkCount: selectedBrief.requirementChecks.length },
+        });
       }
     }
     const nextTasks = maybeAddConfirmedMicroAction(tasks, messages, text);
@@ -2711,6 +2840,12 @@ export default function PathPage() {
       setTasks(nextTasks);
       savePathTasks(nextTasks);
       activatePanel('tasks');
+      void trackEvent({
+        eventName: 'path_micro_action_confirmed',
+        page: '/path',
+        status: 'success',
+        metadata: { taskCount: nextTasks.filter((task) => !task.completedAt).length, source: 'chat', step: currentStep },
+      });
     }
     const inferredResourceNotes = inferResourceNotesFromUserText(text, currentExplorationRole);
     if (inferredResourceNotes.length) {
@@ -2733,6 +2868,7 @@ export default function PathPage() {
       status: 'success',
       metadata: { turnNumber: messages.filter((message) => message.role === 'user').length + 1, roleName: currentExplorationRole || null },
     });
+    logPathCoachTurn('user', text, currentStep);
     setMessages(nextMessages);
     setDraft('');
     setIsCoachTyping(true);
@@ -2783,13 +2919,34 @@ export default function PathPage() {
           if (!prev) return prev;
           return { ...prev, requirementChecks: mergeRequirementChecks(prev.requirementChecks, requirementParsed.checks) };
         });
+        for (const check of requirementParsed.checks) {
+          void trackEvent({
+            eventName: 'path_requirement_checked',
+            page: '/path',
+            status: check.status,
+            metadata: { requirement: check.requirement, pathTitle: selectedBrief?.pathTitle || null },
+          });
+        }
       }
       if (readinessParsed.readiness) {
         setReadiness(readinessParsed.readiness);
         setSelectedBrief((prev) => (prev && !prev.willingness ? { ...prev, willingness: 'want' } : prev));
         activatePanel('overview');
+        void trackEvent({
+          eventName: 'path_readiness_generated',
+          page: '/path',
+          status: 'success',
+          metadata: {
+            score: readinessParsed.readiness.score,
+            haveCount: readinessParsed.readiness.have.length,
+            verifyCount: readinessParsed.readiness.verify.length,
+            nextCount: readinessParsed.readiness.next.length,
+            pathTitle: selectedBrief?.pathTitle || null,
+          },
+        });
       }
       setMessages((prev) => [...prev, ...assistantMessages]);
+      logPathCoachTurn('assistant', readinessParsed.cleanText, currentStep);
       void trackEvent({ eventName: 'path_chat_reply_received', page: '/path', status: 'success', metadata: { roleName: currentExplorationRole || null } });
       const checksForRole = explorationChecksByRole[currentExplorationRole] || [];
       if (hasEnoughEvidenceForPathUpdate(nextMessages, checksForRole)) {

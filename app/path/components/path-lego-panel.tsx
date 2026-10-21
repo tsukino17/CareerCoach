@@ -18,6 +18,7 @@ import {
   type QuadrantFit,
 } from '@/lib/path-lego';
 import { drawPathShareCard, type ShareCardQuadrant } from '@/lib/path-share-canvas';
+import { trackEvent } from '@/lib/analytics-client';
 
 const SHARE_SITE_URL = 'https://echotalent.fun/path';
 
@@ -171,9 +172,20 @@ export function PathLegoPanel({
         siteUrl: SHARE_SITE_URL,
       });
       setShareImageUrl(canvas.toDataURL('image/png'));
+      void trackEvent({
+        eventName: 'path_share_card_generated',
+        page: '/path',
+        status: 'success',
+        metadata: {
+          superpowerCount: profile.superpowers.length,
+          nicheCount: niches.length,
+          pathCount: paths.length,
+        },
+      });
     } catch (error) {
       console.error('[path-share] generate failed', error);
       setShareError('分享卡片生成失败，请稍后再试。');
+      void trackEvent({ eventName: 'path_share_card_generated', page: '/path', status: 'error' });
     } finally {
       setShareGenerating(false);
     }
@@ -185,6 +197,7 @@ export function PathLegoPanel({
     link.href = shareImageUrl;
     link.download = `echotalent-path-${shareName || 'card'}.png`;
     link.click();
+    void trackEvent({ eventName: 'path_share_card_saved', page: '/path', status: 'success' });
   };
 
   const handleNativeShare = async () => {

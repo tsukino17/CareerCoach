@@ -1,5 +1,14 @@
 # AI 助手合作日志
 
+## 2026-10-21（现实路径教练 · 埋点接入后台看板与周报）
+
+- **埋点事件**：路径页与对话全链路写入 `analytics_events`——`path_opened`、`path_mainline_selected`、`path_mainline_blocked`（完成度不足被引导）、`path_step2_unlocked`、`path_step3_unlocked`、`path_evidence_confirmed`、`path_requirement_checked`、`path_willingness_selected`、`path_readiness_generated`、`path_micro_action_confirmed`、`path_share_card_generated` / `path_share_card_saved`；对话正文复用 `anonymous_chat_message`（page=/path，附 `anonymousConversationId`、step、testMode），后台「原始对话」可直接查看。
+- **统一口径**：新建 `lib/path-analytics.ts` 聚合函数，后台 API 与周报共用同一套计算，避免两边数字不一致；Step 解锁按访客去重、准备度取平均分。
+- **后台概览**：`/admin` 新增「现实路径教练」面板——五段转化（打开路径页 → 设定主线 → Step 2 → Step 3 → 确认微行动）+ 证据卡、需求对照、意愿与准备度三组明细；无数据时给出空态说明。
+- **周报**：`lib/weekly-report.ts` 运营洞察新增路径转化、证据与意愿准备度三句；文本版与 HTML 版均新增「现实路径教练」板块（KPI 四宫格 + 阶段/证据明细表），并补充指标说明。
+- **站点标记修正**：`analytics-client` 统一附带 `metadata.host`，使后台与周报默认的「仅线上」口径能正确识别 echotalent.fun，本地事件不会混入。
+- 验证：`npx tsc --noEmit` 零错误；样例事件单测聚合结果正确；本地 `/admin` 与 `/api/admin/insights` 返回 200 且包含 `realityPath` 字段。
+
 ## 2026-10-21（发布 v4.5.8 · Reality Path Coach · Three Steps）
 
 - 版本号 4.5.7 → 4.5.8 顺延，`package.json`、`package-lock.json`、`CHANGELOG.md`、`README.md`、`/chat` 角标同步；本次随版本发布现实路径三步闭环（Step 2 信息聚焦 + Step 3 行动收束）、证据确认卡、教练表达升级、行动区视觉整合、分享卡完整性门槛、三画像演示对话与 qwen3.7-plus 兜底模型升级。

@@ -2,6 +2,7 @@
 
 import { useAdminData } from '@/components/admin/admin-shell';
 import type { DailyMetric, InsightsResponse, MetricKey } from '@/lib/admin-types';
+import type { RealityPathStats } from '@/lib/path-analytics';
 
 export default function AdminOverviewPage() {
   const { data } = useAdminData();
@@ -18,6 +19,8 @@ export default function AdminOverviewPage() {
       ) : null}
 
       <TotalsSummary data={data} />
+
+      <RealityPathPanel stats={data.realityPath} />
 
       <MetricTrendChart
         range={data.range}
@@ -72,6 +75,111 @@ function TotalsSummary({ data }: { data: InsightsResponse }) {
         </div>
       ))}
     </section>
+  );
+}
+
+function RealityPathPanel({ stats }: { stats?: RealityPathStats }) {
+  if (!stats) return null;
+  const steps = [
+    { label: '打开路径页', value: stats.openedVisitors, unit: '人', hint: '去重访客' },
+    { label: '设定主线', value: stats.mainlinesSelected, unit: '次', hint: stats.mainlineBlocked ? `另有 ${stats.mainlineBlocked} 次因未达门槛被拦` : '完成度达标后可选主线' },
+    { label: '解锁 Step 2', value: stats.step2UnlockedVisitors, unit: '人', hint: '积木齐全 + 证据 ≥2' },
+    { label: '解锁 Step 3', value: stats.step3UnlockedVisitors, unit: '人', hint: '需求对照 + 意愿确认' },
+    { label: '确认微行动', value: stats.microActions, unit: '条', hint: '写入任务列表' },
+  ];
+  const maxValue = Math.max(...steps.map((item) => item.value), 1);
+  const hasData = steps.some((item) => item.value > 0)
+    || stats.chatConversations > 0
+    || stats.evidence.total > 0
+    || stats.requirements.total > 0
+    || stats.readiness.count > 0
+    || stats.shareCards > 0;
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-900">现实路径教练</h2>
+          <p className="mt-1 text-sm text-slate-500">从打开路径页到确认第一个微行动，各步骤的完成与流失</p>
+        </div>
+        <span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-medium text-sky-700">路径三步</span>
+      </div>
+
+      {!hasData ? (
+        <p className="mt-4 rounded-xl bg-slate-50 px-3 py-3 text-sm text-slate-500">当前日期范围暂无现实路径数据。</p>
+      ) : (
+        <>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            {steps.map((step) => (
+              <div key={step.label} className="rounded-xl border border-slate-100 bg-slate-50 p-4">
+                <p className="text-xs text-slate-500">{step.label}</p>
+                <p className="mt-1 text-2xl font-bold text-slate-900">
+                  {step.value}
+                  <span className="ml-1 text-sm font-medium text-slate-500">{step.unit}</span>
+                </p>
+                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200">
+                  <div
+                    className="h-full rounded-full bg-sky-500"
+                    style={{ width: `${Math.max(2, Math.round((step.value / maxValue) * 100))}%` }}
+                  />
+                </div>
+                <p className="mt-2 text-[11px] leading-5 text-slate-500">{step.hint}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <StatGroup
+              title="教练对话"
+              rows={[
+                ['对话场次', stats.chatConversations],
+                ['用户消息', stats.chatUserMessages],
+              ]}
+            />
+            <StatGroup
+              title="能力证据卡"
+              rows={[
+                ['已证实', stats.evidence.confirmed],
+                ['部分证实', stats.evidence.partial],
+                ['用户否定', stats.evidence.rejected],
+              ]}
+            />
+            <StatGroup
+              title="需求对照"
+              rows={[
+                ['已对上', stats.requirements.checked],
+                ['待确认', stats.requirements.pending],
+                ['暂无线索', stats.requirements.gap],
+              ]}
+            />
+            <StatGroup
+              title="意愿与准备度"
+              rows={[
+                ['想做 / 观望 / 不想做', `${stats.willingness.want} / ${stats.willingness.unsure} / ${stats.willingness.no}`],
+                ['准备度卡 / 平均分', `${stats.readiness.count} / ${stats.readiness.averageScore}`],
+                ['生成分享卡', stats.shareCards],
+              ]}
+            />
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function StatGroup({ title, rows }: { title: string; rows: Array<[string, number | string]> }) {
+  return (
+    <div className="rounded-xl border border-slate-100 p-4">
+      <p className="text-sm font-medium text-slate-700">{title}</p>
+      <div className="mt-2 space-y-1.5">
+        {rows.map(([label, value]) => (
+          <div key={label} className="flex items-center justify-between gap-3 text-xs">
+            <span className="text-slate-500">{label}</span>
+            <span className="font-semibold text-slate-900">{value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

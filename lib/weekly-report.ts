@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { computeRealityPathStats } from '@/lib/path-analytics';
 
 type EventRow = {
   event_name: string | null;
@@ -292,6 +293,8 @@ async function buildPeriodicReport(supabase: SupabaseClient, now: Date, cadence:
       .sort((a, b) => b.tokens - a.tokens)
       .slice(0, 8),
   };
+  // 现实路径教练：path_* 行为事件 + 路径页匿名对话（anonymous_chat_message @ /path）
+  const realityPath = computeRealityPathStats(events);
   const report = {
     period,
     totals: {
@@ -337,6 +340,7 @@ async function buildPeriodicReport(supabase: SupabaseClient, now: Date, cadence:
     },
     setupWarnings: [profileError && 'user_profiles 查询失败，新增注册数可能不完整。', allProfilesError && 'user_profiles 总数查询失败。', authUsersError && '认证用户查询失败，总注册数可能不完整。', messageError && 'messages 查询失败，对话数可能不完整。', allTimeVisitorsError && 'analytics_events 历史查询失败，总访客数可能不完整。', usageError && 'ai_usage_events 查询失败，AI 用量数据可能不完整。'].filter(Boolean),
     aiUsage,
+    realityPath,
   };
   return report;
 }
@@ -407,6 +411,29 @@ function buildInsights(report: WeeklyReport): string[] {
     );
   }
 
+  const realityPath = report.realityPath;
+  if (realityPath.openedVisitors > 0 || realityPath.chatConversations > 0 || realityPath.mainlinesSelected > 0) {
+    const step2Rate = realityPath.openedVisitors
+      ? Math.round((realityPath.step2UnlockedVisitors / realityPath.openedVisitors) * 100)
+      : 0;
+    const step3Rate = realityPath.step2UnlockedVisitors
+      ? Math.round((realityPath.step3UnlockedVisitors / realityPath.step2UnlockedVisitors) * 100)
+      : 0;
+    insights.push(
+      `现实路径教练：${realityPath.openedVisitors} 位访客打开路径页，产生 ${realityPath.chatConversations} 场对话、${realityPath.chatUserMessages} 条用户消息；${realityPath.mainlinesSelected} 次设定主线${realityPath.mainlineBlocked ? `（另有 ${realityPath.mainlineBlocked} 次因完成度不足被引导）` : ''}。Step 2 解锁 ${realityPath.step2UnlockedVisitors} 人（路径页访客的 ${step2Rate}%），Step 3 解锁 ${realityPath.step3UnlockedVisitors} 人（Step 2 的 ${step3Rate}%），确认微行动 ${realityPath.microActions} 条、生成分享卡 ${realityPath.shareCards} 次。`
+    );
+    if (realityPath.evidence.total > 0) {
+      insights.push(
+        `路径证据：本周新增 ${realityPath.evidence.total} 张证据卡，其中已证实 ${realityPath.evidence.confirmed}、部分证实 ${realityPath.evidence.partial}、用户否定 ${realityPath.evidence.rejected}；需求对照已对上 ${realityPath.requirements.checked} 项、待确认 ${realityPath.requirements.pending} 项、暂无线索 ${realityPath.requirements.gap} 项。`
+      );
+    }
+    if (realityPath.readiness.count > 0) {
+      insights.push(
+        `路径意愿与准备度：想做 ${realityPath.willingness.want} 次、观望 ${realityPath.willingness.unsure} 次、不想做 ${realityPath.willingness.no} 次；共生成 ${realityPath.readiness.count} 份准备度卡，平均 ${realityPath.readiness.averageScore} 分（分数仅来自已确认证据）。`
+      );
+    }
+  }
+
   return insights;
 }
 
@@ -470,6 +497,14 @@ export function renderWeeklyReportText(report: Awaited<ReturnType<typeof buildWe
     `全部：历史累计访客 ${totals.totalVisitors} 人，累计注册 ${totals.registeredUsers} 人`,
     `使用：对话 ${totals.conversations}，用户消息 ${totals.userMessages}`,
     '',
+    '现实路径教练：',
+    `- 路径页访客 ${report.realityPath.openedVisitors} 人，教练对话 ${report.realityPath.chatConversations} 场 / 用户消息 ${report.realityPath.chatUserMessages} 条`,
+    `- 主线设定 ${report.realityPath.mainlinesSelected} 次（完成度不足被引导 ${report.realityPath.mainlineBlocked} 次），解锁 Step 2 ${report.realityPath.step2UnlockedVisitors} 人 / Step 3 ${report.realityPath.step3UnlockedVisitors} 人`,
+    `- 证据卡：已证实 ${report.realityPath.evidence.confirmed} / 部分证实 ${report.realityPath.evidence.partial} / 用户否定 ${report.realityPath.evidence.rejected}（共 ${report.realityPath.evidence.total}）`,
+    `- 需求对照：已对上 ${report.realityPath.requirements.checked} / 待确认 ${report.realityPath.requirements.pending} / 暂无线索 ${report.realityPath.requirements.gap}`,
+    `- 意愿：想做 ${report.realityPath.willingness.want} / 观望 ${report.realityPath.willingness.unsure} / 不想做 ${report.realityPath.willingness.no}；准备度 ${report.realityPath.readiness.count} 份，平均 ${report.realityPath.readiness.averageScore} 分`,
+    `- 确认微行动 ${report.realityPath.microActions} 条，生成分享卡 ${report.realityPath.shareCards} 次`,
+    '',
     '每日访问：',
     ...report.daily.map((item) => `- ${item.date}: PV ${item.pv} / UV ${item.uv}`),
     '',
@@ -511,7 +546,7 @@ export function renderWeeklyReportText(report: Awaited<ReturnType<typeof buildWe
 }
 
 export function renderWeeklyReportHtml(report: WeeklyReport, title = '网站周报') {
-  const { period, totals, daily, topPages, funnel, events, sources, channels, campaigns, cities, browsers, devices, deviceModels, operatingSystems, retention, bots, setupWarnings, aiUsage } = report;
+  const { period, totals, daily, topPages, funnel, events, sources, channels, campaigns, cities, browsers, devices, deviceModels, operatingSystems, retention, bots, setupWarnings, aiUsage, realityPath } = report;
   const insights = buildInsights(report);
   const perCapita = totals.uv ? (totals.pv / totals.uv).toFixed(1) : '—';
 
@@ -545,6 +580,28 @@ export function renderWeeklyReportHtml(report: WeeklyReport, title = '网站周�
   const funnelSection = section('转化漏斗', funnel.length
     ? renderDataTable(['步骤', '开始', '流失', '流失率'], funnel.map((item) => [item.step, item.starts, item.drops, `${item.dropRate}%`]))
     : '<p style="margin:0;color:#64748b;font-size:13px;">本周期没有记录到 flow_step。</p>');
+
+  const hasRealityPathData = realityPath.openedVisitors > 0
+    || realityPath.chatConversations > 0
+    || realityPath.mainlinesSelected > 0
+    || realityPath.evidence.total > 0
+    || realityPath.readiness.count > 0;
+  const realityPathKpi = [kpiCell(String(realityPath.openedVisitors), '路径页访客'), kpiCell(String(realityPath.step2UnlockedVisitors), 'Step 2 解锁'), kpiCell(String(realityPath.step3UnlockedVisitors), 'Step 3 解锁'), kpiCell(String(realityPath.microActions), '确认微行动')].join('');
+  const realityPathSection = section('现实路径教练', hasRealityPathData
+    ? `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:separate;border-spacing:8px;margin-bottom:14px;"><tr>${realityPathKpi}</tr></table>
+    ${renderDataTable(['阶段', '数值'], [
+      ['路径页访客 / 教练对话 / 用户消息', `${realityPath.openedVisitors} 人 / ${realityPath.chatConversations} 场 / ${realityPath.chatUserMessages} 条`],
+      ['主线设定（完成度不足被引导）', `${realityPath.mainlinesSelected} 次（${realityPath.mainlineBlocked} 次）`],
+      ['Step 2 / Step 3 解锁', `${realityPath.step2UnlockedVisitors} 人 / ${realityPath.step3UnlockedVisitors} 人`],
+      ['确认微行动 / 分享卡生成', `${realityPath.microActions} 条 / ${realityPath.shareCards} 次`],
+    ])}
+    <div style="margin-top:14px;">${renderDataTable(['证据与意愿', '数值'], [
+      ['证据卡：已证实 / 部分证实 / 用户否定', `${realityPath.evidence.confirmed} / ${realityPath.evidence.partial} / ${realityPath.evidence.rejected}`],
+      ['需求对照：已对上 / 待确认 / 暂无线索', `${realityPath.requirements.checked} / ${realityPath.requirements.pending} / ${realityPath.requirements.gap}`],
+      ['意愿：想做 / 观望 / 不想做', `${realityPath.willingness.want} / ${realityPath.willingness.unsure} / ${realityPath.willingness.no}`],
+      ['准备度卡数量 / 平均分', `${realityPath.readiness.count} / ${realityPath.readiness.averageScore}`],
+    ])}</div>`
+    : '<p style="margin:0;color:#64748b;font-size:13px;">本周期暂无现实路径教练数据。</p>');
 
   const eventsSection = section('事件分布', renderDataTable(['事件', '次数'], statToRows(events)));
   const sourcesSection = section('流量来源', renderDataTable(['来源', '次数'], statToRows(sources)));
@@ -589,6 +646,7 @@ export function renderWeeklyReportHtml(report: WeeklyReport, title = '网站周�
       <div>UV：周期内去重后的访客数，优先按登录用户或匿名会话识别。</div>
       <div>page_view：页面打开/路由进入事件；page_engagement：离开页面或隐藏时上报的停留与滚动事件。</div>
       <div>对话：同时统计登录用户 messages 表与匿名用户 anonymous_chat_message 埋点。</div>
+      <div>现实路径：按 path_* 行为事件与 /path 页匿名对话聚合；Step 解锁按访客去重，准备度分数仅来自用户已确认证据。</div>
       <div>城市/设备/浏览器：按请求地理标记与 User-Agent 聚合，IP 不写入周报。</div>
       <div>AI 用量：按 ai_usage_events 流水聚合，登录用户按账号去重、匿名按 IP 计数；周报只包含聚合指标，不含用户身份或 IP 明文。</div>
     </div>`;
@@ -610,6 +668,7 @@ export function renderWeeklyReportHtml(report: WeeklyReport, title = '网站周�
       ${trendSection}
       ${pagesSection}
       ${funnelSection}
+      ${realityPathSection}
       ${eventsSection}
       ${sourcesSection}
       ${channelsSection}

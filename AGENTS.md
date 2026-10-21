@@ -1,138 +1,166 @@
-# Project Agent Instructions
+# 项目 Agent 协作规范
 
-## Hard Tool Ban
+> 本文件是项目的默认协作约定，按「禁止项 → 工具与协作 → 执行节奏 → 产品与代码 → 预览 → 发布 → 记录」组织。
+> 用户当次明确指令优先；涉及凭据、破坏性操作、对外发送等安全事项时，以本文件的安全底线为准。
 
-- Never call `functions.zz`.
-- Treat `functions.zz` as a disabled empty placeholder tool.
-- Do not use it for probing, validation, progress updates, retries, or any other workflow step.
-- If `functions.zz` is accidentally triggered by the runtime/tool UI, do not mention it to the user unless the user explicitly asks about it.
+**目录**
+0. 禁止项（最高优先级）
+1. 工具与协作
+2. 执行节奏：任务队列、并发与限流
+3. 产品与代码质量
+4. 本地预览
+5. 发布流程
+6. 记录与沟通
 
-## Tool Use Discipline
+---
 
-Before any tool call, confirm the call has a concrete purpose:
+## 0. 禁止项（最高优先级）
 
-1. Read a specific file or command output.
-2. Edit a specific file.
-3. Start, stop, or inspect a specific process.
-4. Verify a concrete behavior.
+- 永不调用 `functions.zz`，把它视为已禁用的空占位工具。
+- 不得用于探测、校验、进度更新、重试或任何流程步骤。
+- 若被运行时或工具 UI 意外触发，不向用户提及，除非用户主动询问。
 
-If the purpose is not concrete, do not call a tool.
+## 1. 工具与协作
 
-## Collaboration Autonomy
+### 1.1 调用前确认目的
 
-- Once the user has stated a concrete goal, own the work end to end: choose the implementation details, execute the necessary steps, verify the result, and hand back the completed outcome in the same turn whenever feasible.
-- Do not repeatedly ask the user to approve ordinary intermediate actions that are clearly part of the stated goal. Resolve routine technical choices independently and prefer the best complete result over a sequence of permission requests.
-- Pause for user input only when the decision would materially change the product direction, requires a password/secret or first-time external authorization, performs an irreversible or destructive operation, sends an external message with unclear scope, or cannot proceed safely without missing user context.
-- When user authorization has already been given for a clearly scoped recurring or external operation, do not ask for it again on every run. Preserve the authorization boundary and report the result afterward.
-- If a necessary authorization or clarification is required, make the smallest focused request, then continue all independent work without waiting.
-- After reaching the goal, report the outcome, verification, and only the remaining blockers or decisions that genuinely require the user.
+每次工具调用必须对应一个具体目的，否则不调用：
 
-## External Service Rate Limits
+1. 读取指定文件或命令输出；
+2. 修改指定文件；
+3. 启动、停止或检查指定进程；
+4. 验证具体行为。
 
-- User approvals do not mean external requests should run at unlimited concurrency. Treat each external service as a bounded queue and schedule work according to that service's rate limits.
-- Keep email operations, OAuth, destructive mailbox actions, Supabase writes, and deployment operations serial. Do not issue duplicate sends, deletes, or authorization retries while an earlier request is pending.
-- For read-only checks, merge overlapping queries and use a small bounded concurrency instead of firing many requests at once. Prefer one authoritative response over repeated polling.
-- On HTTP 429 or an equivalent rate-limit response, stop issuing requests to that service, honor `Retry-After` when provided, then retry with capped exponential backoff and jitter. Never retry a write blindly when the outcome is unknown; verify its status first or use an idempotency key.
-- When a request reaches its retry limit, report the service, operation, and request ID, then continue independent local work. Do not treat the error as a missing user approval or immediately launch another identical retry.
-- Keep a short-lived task queue for multi-part goals: finish or verify the current external operation before starting the next dependent operation, while local analysis and file edits may continue independently.
-- For the Codex/upstream request path, use one active model request per task unless a genuinely independent read-only check is required. Coalesce successive user edits into the current task, pause new upstream calls after a 429, and resume only after the backoff window. A surfaced retry-limit error is a recovery event: preserve the task state, avoid restarting the whole task, and continue from the last verified checkpoint.
-- Retry policy must be bounded: prefer `Retry-After`, otherwise use capped exponential backoff with jitter (for example 2s, 5s, 10s, then stop). Never run parallel retries, never retry a non-idempotent external write when the result is unknown, and never turn a rate-limit response into repeated user approval requests.
+### 1.2 工具选择
 
-## Task Queue And Prioritization
+- 读文件用 Read，找文件用 Glob，搜内容用 Grep，改文件用 Edit/Write；不要用 `cat` / `head` / `sed` / `awk` / `echo` 替代专用工具。
+- Shell 仅用于系统命令、构建、测试、进程管理和确需 shell 的操作。
+- 浏览器自动化只用于视觉或交互验证；能静态确认的先静态确认。
+- 会话中已有运行中的进程时先复用或检查，不重复启动同一条命令。
 
-- Treat successive user comments as updates to one active goal unless the user clearly replaces that goal. Maintain a task queue internally and keep moving toward the latest overall outcome.
-- Decide priority autonomously: first resolve blockers and correctness risks, then complete the core user-facing result, then verification, then polish and cleanup. Do not ask the user to order ordinary implementation details.
-- Decide concurrency autonomously. Run independent, read-only local checks in bounded parallelism when useful; serialize edits to the same file, dependent build steps, external service calls, email operations, authentication, destructive actions, and deployment work.
-- When a new request arrives during ongoing work, merge it into the queue if compatible, re-evaluate dependencies and concurrency, and continue. Do not abandon completed work or restart unrelated tasks from scratch.
-- Keep the user informed only at meaningful milestones: scope changes, blockers, authorization points, completed verification, and final outcomes. Do not turn every queue decision or intermediate retry into a user question.
-- Before handing back the result, check that the latest user request is reflected, dependent tasks are complete, and no running process or external operation remains unresolved.
-- If the upstream model request itself is temporarily unavailable, finish safe local work such as reading, planning, editing, and validation in the same queue; only pause when the blocked operation is indispensable and cannot be recovered from the last verified state.
+### 1.3 自主协作边界
 
-## Preferred Tools
+- 用户给出明确目标后，端到端负责：自行决定实现细节、执行必要步骤、验证结果，并尽量在同一轮交付完成结果。
+- 不为属于既定目标的普通中间操作反复请求许可；常规技术选择自行决定，优先完整结果而非一连串确认。
+- 仅在以下情况暂停询问：决策会实质改变产品方向；需要密码/密钥或首次外部授权；不可逆或破坏性操作；对外发送且范围不清；缺少必要的用户上下文。
+- 用户已授权明确范围内的重复或外部操作后，不每次重新询问；守住授权边界，完成后报告。
+- 确需授权或澄清时，只提最小范围的问题，然后继续所有不依赖它的工作。
+- 达成目标后，报告结果、验证情况和真正需要用户决策的剩余事项。
 
-- Use `exec_command` for explicit shell commands.
-- Use `apply_patch` for file edits.
-- Use `write_stdin` only for an existing running session.
-- Use browser automation only when visual or interaction verification is necessary.
+## 2. 执行节奏：任务队列、并发与限流
 
-## Product Quality Principle
+### 2.1 任务队列与优先级
 
-- Do not design product behavior from a fallback-first mindset. Fallbacks are only the minimum safety net for abnormal, slow, missing, or degraded states.
-- Start every product/UI/content implementation from the best intended user experience: high-quality output, accurate meaning, strong information value, and polished presentation.
-- When space, latency, or technical constraints exist, preserve meaning and user value first, then simplify layout or reduce quantity. Do not let defensive truncation, generic filler, or low-information placeholder logic become the normal path.
-- For generated reports, share images, summaries, and user-facing writing, prefer complete, high-signal, semantically faithful content. If content must be shortened, rewrite or select better complete ideas rather than exposing broken fragments.
-- When a user reports a repeated UX, visual, content, or product-quality problem, do not keep making isolated surface tweaks. Step back, find the shared root cause, align prompt rules, rendering logic, data rules, and interaction triggers as needed, then self-review from product management, UX, visual design, and engineering perspectives before handing back the preview.
+- 用户连续反馈视为同一目标的更新，除非明确替换目标；内部维护任务队列，持续朝最新整体结果推进。
+- 优先级自行决定：先解决阻塞与正确性风险，再完成核心用户可见结果，然后验证，最后打磨与清理；不让用户为普通实现细节排序。
+- 新请求到来时，兼容则合入队列，重新评估依赖与并发后继续；不放弃已完成工作，也不从头重启无关任务。
+- 只在有意义节点同步：范围变化、阻塞、授权点、验证完成、最终结果；不把每个队列决策或中间重试都变成用户提问。
+- 交付前确认：最新请求已反映、依赖任务已完成、没有未解决的后台进程或外部操作。
+- 若上游模型请求本身暂时不可用，先完成安全的本地工作（读取、规划、编辑、验证）；只有被阻塞的操作不可或缺且无法从最后验证状态恢复时才暂停。
 
-### Reality Path Product Principle
+### 2.2 并发与串行
 
-- The reality path is an ability-migration map, not a deficit-repair or homework list. Start from the belief that users are intelligent and already possess meaningful abilities and resources; the coach helps them notice, name, translate, and mobilize those assets toward a target role.
-- The reality path coach is a translator: first see recurring strengths and resources in the user's past, then translate old-role behaviors into target-role actions, identify where those abilities can transfer, and finally help the user choose one low-friction way to call them into use.
-- For each target role, the coaching flow must lock 3–5 core capabilities, verify one at a time with one high-value piece of proven work evidence, summarize experience → reusable capability → target-role action, and then move on. After all 3–5 are checked, summarize confirmed, partial, and unverified evidence before offering the next exploration entry.
-- Reality clue verification has an explicit trigger: after a concrete role is selected and the user gives one high-value experience/result for the current capability, the coach must summarize experience → reusable capability → target-role action and pause for one user confirmation. This evidence confirmation is separate from the later confirmation to write a batch update to the left board.
-- Tools, frameworks, technologies, and software are not forbidden questions; they are later-stage context. During early direction exploration, prioritize what the user has done, solved, and delivered. After the user confirms a concrete target direction, use real job descriptions to explain common tools as replaceable ways of working; do not treat a mentioned tool as a capability gap unless the role explicitly requires a non-substitutable certification, license, or technical condition.
-- Do not make “what the user lacks” the default storyline. Distinguish between missing ability, missing evidence, missing market language, and an unused resource. Only surface a gap when it materially affects the target path, and frame it as the smallest evidence or access step needed to make an existing ability legible and usable.
-- Product surfaces, records, scores, prompts, and actions should make users feel “I already have a path I can continue” rather than “I must become someone else first.” Do not overclaim that every ability transfers; make transfer hypotheses explicit and verify them through real work tasks, evidence, and user preference.
-- The coach should awaken and guide discovery, not lecture or prescribe. Use concrete reflection, comparisons, and one focused question to help users form their own judgment; do not rush to tell them what they should do. Offer actions only when the user asks for advice or has already seen a specific possibility they want to pursue, and present the smallest choice or experiment rather than a command.
-- The task list is a user-owned articulation space, not a coach assignment queue. When a user says “perhaps I should look into X,” treat that as valuable self-generated direction: affirm it, help expand the possible channels, search angles, people, communities, materials, and comparison questions, then record only what the user chooses to keep.
+- 按各外部服务的限流把它当作有界队列，而不是无限并发。
+- 邮箱操作、OAuth、破坏性邮箱操作、Supabase 写入、部署操作保持串行；前一请求未完成时，不发重复的发送、删除或授权重试。
+- 只读检查合并重叠查询，使用小规模有界并发；优先一次权威响应，而不是反复轮询。
+- 同一文件的编辑、相互依赖的构建步骤、外部服务调用、认证、破坏性操作与部署一律串行；本地分析与只读检查可有限并行。
+- Codex/上游请求路径每个任务同时只保留一个进行中的模型请求（确实需要独立只读检查时除外）；连续的用户修改合并到当前任务。
 
-## Code Quality Discipline
+### 2.3 限流与重试
 
-- Write code in a syntactically complete, type-aware style the first time, instead of relying on later build errors to catch basic mistakes.
-- Before applying edits, mentally check object literals, ternaries, JSX tags, imports, hook dependencies, and TypeScript return types for obvious syntax or type-shape issues.
-- Keep new code consistent with nearby patterns and prefer small, verifiable edits when changing active UI or API paths.
-- After meaningful code changes, run the narrowest useful verification available and fix issues introduced by the current change before moving on.
+- 遇到 HTTP 429 或等效限流：立即停止对该服务的请求；有 `Retry-After` 就遵守，否则使用带上限的指数退避加抖动（例如 2s、5s、10s，然后停止）。
+- 结果未知时绝不盲目重试非幂等的对外写入；先核实状态或使用幂等键。
+- 不并行重试；也不把限流响应转化为反复的用户授权请求。
+- 达到重试上限后，报告服务、操作与请求 ID，然后继续独立的本地工作。
+- retry-limit 错误视为恢复事件：保留任务状态，不重启整个任务，从最后验证的检查点继续；429 之后暂停新的上游调用，退避窗口结束再恢复。
 
-## Local Preview
+## 3. 产品与代码质量
 
-- After completing a user-facing feature change, automatically provide the most relevant local preview URL in the final response when a local preview is available or easy to start.
-- When a user asks for a local preview link, prefer `npm run preview` instead of `npm run dev`.
-- The preview script intentionally stops stale Next.js processes on ports 3000/3001, clears `.next`, and starts Next.js on `127.0.0.1:3000` to avoid recurring stale chunk, missing module, and hot-reload cache issues.
-- A local preview is only considered valid when both the target route and its Next.js CSS assets load successfully. Do not treat an HTML `200 OK` alone as enough, because a page can render unstyled when `/_next/static/css/...` assets are stale or missing.
-- `npm run preview` performs a style verification pass after startup. If it reports missing or tiny CSS assets, restart via `npm run preview` after clearing stale processes/cache instead of giving the user that link.
-- If port 3000 is already occupied by a previously working preview server, do not spend excessive time restarting it. Reuse the existing valid preview URL, usually `http://127.0.0.1:3000/<route>`, unless there is concrete evidence that it is stale or broken.
-- When reusing an existing preview URL, first check that the route is styled, either by confirming CSS assets load or by a quick browser visual check when the user has reported styling problems.
-- After every user-facing UI change, automatically run `npm run preview`, wait for the target route compilation to finish, and verify both the route response and its referenced Next.js CSS asset before sharing a preview link. Do not hand off a URL while the preview process is still compiling or before CSS has been confirmed.
-- If preview startup hits a port conflict, check the route once against the existing server before killing or restarting processes; only clean up the port when the existing server fails or is clearly not serving the current project.
-- Use `npm run dev` only when you explicitly need the raw framework command for debugging.
-- If a Next.js build or preview fails with missing `.next/server` chunks, stale static chunk 404s, or webpack pack cache errors, stop the running dev server and restart with `npm run preview`.
+### 3.1 产品质量原则
 
-## Release Version Hygiene
+- 不要用「兜底优先」的思路设计产品行为。兜底只是异常、缓慢、缺失、降级状态下的最低安全网。
+- 每个产品/UI/内容实现都从最理想的用户体验出发：高质量输出、准确含义、强信息价值、精致呈现。
+- 受空间、延迟或技术限制时，先保住含义与用户价值，再简化版式或减少数量；不让防御性截断、通用填充或低信息占位成为常态。
+- 生成的报告、分享图、摘要和用户可见文字，优先完整、高信号、语义忠实的内容；必须缩短时，重写或挑选更好的完整观点，而不是暴露破碎片段。
+- 用户反复反馈同一类 UX、视觉、内容或产品问题时，不要继续做零散表层修补。先找共同根因，必要时统一 prompt 规则、渲染逻辑、数据规则和交互触发，再从产品经理、UX、视觉设计和工程四个角度自检，然后交付预览。
 
-- Every release version update must be applied as one synchronized change to `package.json`, `package-lock.json`, `CHANGELOG.md`, and every current user-visible version label in the app.
-- `README.md` is also a required release surface: update its current version and user-facing feature/deployment notes in the same release change.
-- The `/chat` header badge is a required release surface: it must match the package version exactly, including the `v` prefix used by the UI.
-- Report/share filenames and any other shipped UI version labels must use the same release version unless the user explicitly asks to keep them separate.
-- Before committing or pushing a release, search for stale version strings from the previous release; update active code and UI references, while leaving only historical changelog entries unchanged.
-- A release is not ready to push until `package.json`, `package-lock.json`, `README.md`, `CHANGELOG.md`, and the `/chat` badge have been checked together in the same verification pass.
+### 3.2 现实路径教练产品原则
 
-## GitHub To Vercel Release Flow
+- 现实路径是能力迁移地图，不是缺陷修补或作业清单。默认用户是聪明的、已经拥有有意义的能力与资源；教练帮助其看见、命名、翻译并调用这些资产去接近目标角色。
+- 教练是翻译器：先看见用户过去反复出现的优势和资源，再把旧角色的行为翻译成目标角色的动作，指出能力可以迁移到哪里，最后帮助用户选择一个低阻力方式把它调用起来。
+- 针对每个目标角色，锁定 3–5 项核心能力，一次只验证一项，用一件高价值、可证明的工作证据验证，并总结「经历 → 可复用能力 → 目标岗位动作」，然后继续下一项。全部核对完后，先总结已确认、部分确认、未验证的证据，再提供下一个探索入口。
+- 现实线索验证有明确触发点：用户选定具体角色并为当前能力给出一段高价值经历/结果后，教练必须总结「经历 → 可复用能力 → 目标岗位动作」，并暂停等待用户确认一次。这次证据确认与之后「批量写入左侧资料板」的确认是两件事。
+- 工具、框架、技术和软件不是禁区问题，而是后置语境。早期方向探索优先问用户做过什么、解决过什么、交付过什么。用户确认具体目标方向后，再用真实岗位描述说明常见工具是可替换的工作方式；除非岗位明确要求不可替代的证书、执照或技术条件，不把用户提到的工具当作能力缺口。
+- 不要把「用户缺什么」当作默认叙事。区分缺少能力、缺少证据、缺少市场语言、已有资源尚未调用；只有当某处实质影响目标路径时才提出缺口，并把它表述为「让已有能力可被看见、可使用」所需的最小证据或入口步骤。
+- 产品界面、记录、评分、prompt 和行动应让用户感到「我已经有一条可以继续走的路」，而不是「我必须先变成另一个人」。不要宣称所有能力都能迁移；迁移假设要显式标注，并通过真实工作任务、证据和用户偏好去验证。
+- 教练应唤醒和引导发现，而不是说教或下指令。用具体反思、对比和一个聚焦问题帮助用户形成自己的判断；不要急于告诉用户该做什么。只有用户主动询问建议，或已经看到想尝试的具体可能时，才提供行动，并给出最小选项或实验，而不是命令。
+- 任务列表是用户自己的表达空间，不是教练的派活队列。用户说「也许我该了解一下 X」时，把这当作有价值的自发方向：肯定它，帮其扩展可能的渠道、搜索角度、相关的人、社群、材料和比较问题，然后只记录用户选择保留的内容。
 
-- Before every GitHub push, run a release security scan over the staged release scope and the full working tree for secrets or private local material.
-- Never commit `.env*` files, Supabase service-role keys, Resend/API keys, access tokens, refresh tokens, passwords, private certificates, browser credentials, mailbox credentials, or generated local data.
-- Treat any credential-shaped match as a release blocker: remove it from the commit, rotate the credential if it was previously pushed, and only continue after rescanning the exact staged diff.
-- Confirm `.gitignore` covers local environment files and review `git diff --cached` plus `git status --short` before pushing.
-- After pushing or merging release code on GitHub, do not assume production has updated. Verify the Vercel deployment explicitly.
-- Use Vercel CLI from the project root when available; `npx vercel` is acceptable if no global `vercel` binary exists.
-- Preferred verification commands:
-  - `npx vercel ls` to confirm the latest Production deployment is `Ready`.
-  - `npx vercel inspect https://echotalent.fun` to confirm the `echotalent.fun` alias points to the latest Production deployment.
-  - `curl -I https://echotalent.fun/chat` to confirm the production route responds.
-- After deployment, open `https://echotalent.fun/chat?new=true` and verify the visible `/chat` version badge matches the release version.
-- For chat/report releases, run one production smoke test:
-  - Send a short non-sensitive chat message and check that the reply streams without visible error.
-  - Open or generate `/report` only when the release touched report generation or report UI.
-- If production still shows an old version after GitHub push, check whether Vercel production is tracking `main` or a release branch before making more code changes.
-- If Vercel CLI reports an invalid token, ask the user to run `npx vercel login`; after authorization, continue with `npx vercel ls` and `npx vercel inspect`.
+### 3.3 代码质量
 
-## Communication
+- 第一次就写语法完整、类型正确的代码，不依赖后续构建错误来发现基础问题。
+- 应用修改前，先自查对象字面量、三元表达式、JSX 标签、导入、hook 依赖和 TypeScript 返回类型是否存在明显的语法或类型问题。
+- 新代码与附近模式保持一致；修改活跃的 UI 或 API 路径时，优先小而可验证的改动。
+- 有意义的代码修改后，运行最窄的有效验证，并在继续之前修掉本次修改引入的问题。
 
-- Do not report meaningless internal tool mistakes.
-- Report user-relevant outcomes: changed files, verification results, remaining blockers.
-- Keep progress updates short and tied to the current task.
+## 4. 本地预览
 
-## Project Logs
+- 完成用户可见的功能改动后，如果本地预览可用或容易启动，在最终回复中自动给出最相关的预览 URL。
+- 用户要本地预览链接时，优先 `npm run preview`，而不是 `npm run dev`。
+- `npm run preview` 会主动清理 3000/3001 端口上的陈旧 Next.js 进程、清空 `.next`，并在 `127.0.0.1:3000` 启动，以避免反复出现的陈旧 chunk、模块缺失和热更新缓存问题。
+- 只有目标路由和它引用的 Next.js CSS 资源都成功加载，才算有效预览。不能只凭 HTML `200 OK` 判断，因为 `/_next/static/css/...` 陈旧或缺失时页面会无样式渲染。
+- `npm run preview` 启动后会做一次样式校验；若报告 CSS 缺失或体积异常小，先清理陈旧进程/缓存并重新用 `npm run preview` 启动，而不是把该链接给用户。
+- 如果 3000 端口已被此前可用的预览服务占用，不要花过多时间重启；复用已有有效 URL（通常是 `http://127.0.0.1:3000/<route>`），除非有明确证据表明它陈旧或损坏。
+- 复用已有预览 URL 前，先确认路由有样式：检查 CSS 资源可加载，或在用户反馈样式问题时做一次浏览器目视检查。
+- 每次用户可见的 UI 改动后，自动运行 `npm run preview`，等目标路由编译完成，并确认路由响应与其引用的 CSS 资源，再分享预览链接；不要在预览仍在编译或 CSS 未确认时交付 URL。
+- 预览启动遇到端口冲突时，先对现有服务检查一次该路由；只有现有服务失败或明显不在服务当前项目时才清理端口。
+- 仅在明确需要原始框架命令调试时使用 `npm run dev`。
+- 若构建或预览出现 `.next/server` chunk 缺失、静态 chunk 404、webpack pack cache 错误，停止运行中的 dev server，并用 `npm run preview` 重启。
 
-- After meaningful project updates, add a short dated entry to `ASSISTANT_LOG.md` summarizing what changed, why it changed, and any verification or blockers.
-- After a version bump, release preparation, or version commit, update `CHANGELOG.md` with the version number, codename if available, release date, and the main user-facing changes.
-- Do not add noisy log entries for abandoned experiments, temporary files, failed drafts, or changes that are immediately reverted unless the failure itself is important project context.
-- Keep `ASSISTANT_LOG.md` as collaboration history and `CHANGELOG.md` as release history; avoid duplicating the same level of detail in both.
+## 5. 发布流程
+
+### 5.1 发布前安全扫描
+
+- 每次 GitHub push 前，对暂存范围和工作区做一次发布安全扫描，检查密钥或私有本地材料。
+- 绝不提交 `.env*` 文件、Supabase service-role key、Resend/API key、访问令牌、刷新令牌、密码、私钥证书、浏览器凭据、邮箱凭据或生成的本地数据。
+- 任何形似凭据的匹配都是发布阻塞项：从提交中移除；若此前已推送，先轮换凭据；重新扫描准确暂存 diff 后才可继续。
+- 确认 `.gitignore` 覆盖本地环境文件，并在 push 前检查 `git diff --cached` 与 `git status --short`。
+
+### 5.2 版本号一致性
+
+- 每次版本更新必须作为一次同步改动，覆盖 `package.json`、`package-lock.json`、`CHANGELOG.md`，以及应用中所有当前可见的版本标签。
+- `README.md` 也是必需的发布面：在同一次改动中更新其当前版本与用户可见的功能/部署说明。
+- `/chat` 顶部角标是必需发布面，必须与 package 版本完全一致，包括 UI 使用的 `v` 前缀。
+- 报告/分享文件名以及其他随版本发布的 UI 版本标签，使用同一发布版本，除非用户明确要求分开。
+- 提交或推送发布前，搜索上一版本的残留字符串；更新活跃代码和 UI 引用，只有历史 changelog 条目可保持不变。
+- 只有在同一次验证中检查过 `package.json`、`package-lock.json`、`README.md`、`CHANGELOG.md` 与 `/chat` 角标后，发布才可推送。
+
+### 5.3 GitHub → Vercel 发布与验证
+
+- 推送或合并发布代码后，不要假设生产已更新，必须显式验证 Vercel 部署。
+- 优先使用项目根目录的 Vercel CLI；没有全局 `vercel` 时可用 `npx vercel`。
+- 常用验证命令：
+  - `npx vercel ls`：确认最新 Production 部署为 `Ready`；
+  - `npx vercel inspect https://echotalent.fun`：确认 `echotalent.fun` 别名指向最新 Production 部署；
+  - `curl -I https://echotalent.fun/chat`：确认生产路由有响应。
+- 部署后打开 `https://echotalent.fun/chat?new=true`，确认可见的 `/chat` 版本角标与发布版本一致。
+- 聊天/报告类发布做一次生产冒烟：
+  - 发送一条简短、非敏感的聊天消息，确认回复正常流式输出且无可见错误；
+  - 只有在发布涉及报告生成或报告 UI 时，才打开或生成 `/report`。
+- 若 GitHub push 后生产仍是旧版本，先检查 Vercel production 跟踪的是 `main` 还是发布分支，再继续改代码。
+- 若 Vercel CLI 报告 token 无效，请用户执行 `npx vercel login`；授权后继续 `npx vercel ls` 与 `npx vercel inspect`。
+
+## 6. 记录与沟通
+
+### 6.1 沟通
+
+- 不汇报无意义的内部工具失误。
+- 汇报用户相关的结果：改动文件、验证结果、剩余阻塞项。
+- 进度更新保持简短，并紧扣当前任务。
+
+### 6.2 项目日志
+
+- 有意义的产品更新后，在 `ASSISTANT_LOG.md` 添加一条带日期的简短记录，说明改了什么、为什么改，以及验证结果或阻塞。
+- 版本号变更、发布准备或版本提交后，更新 `CHANGELOG.md`，写入版本号、代号（如有）、发布日期和主要用户可见变化。
+- 不为放弃的实验、临时文件、失败草稿或立即回滚的改动添加噪音日志，除非失败本身是重要的项目上下文。
+- `ASSISTANT_LOG.md` 作为协作历史，`CHANGELOG.md` 作为发布历史；避免两者在同一细节层面重复。
