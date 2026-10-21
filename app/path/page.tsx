@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ClipboardCheck,
+  Clock3,
   Compass,
   FilePenLine,
   FileText,
@@ -28,6 +29,26 @@ import {
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { PATH_TEST_PERSONAS, CORE_VALUE_LABELS, type PathTestPersona } from '@/lib/path-test-personas';
+import { getMockConversation } from '@/lib/path-test-conversations';
+import { buildLegoProfileFromReport, displayPathTitle, type DeliveryFormat, type LegoPath } from '@/lib/path-lego';
+import {
+  isStep2Unlocked,
+  mergeRequirementChecks,
+  parseReadinessFromReply,
+  parseRequirementCardsFromReply,
+  REQUIREMENT_STATUS_META,
+  type ReadinessSummary,
+  type SelectedPathBrief,
+} from '@/lib/path-step';
+import {
+  EMPTY_CONSTRAINTS,
+  PROFICIENCY_META,
+  parseEvidenceCardsFromReply,
+  type EvidenceCard,
+  type RealityConstraints,
+} from '@/lib/path-evidence';
+import { PathLegoPanel } from '@/app/path/components/path-lego-panel';
 import { supabase } from '@/lib/supabase';
 import { authHeaders } from '@/lib/api-auth';
 import { AuthDialog } from '@/components/auth-dialog';
@@ -47,7 +68,7 @@ import {
 import { getDemoCaseById, isDemoModeActive } from '@/lib/demo-cases';
 import { trackEvent } from '@/lib/analytics-client';
 
-type PathMessage = { role: 'user' | 'assistant'; content: string };
+type PathMessage = { role: 'user' | 'assistant'; content: string; evidenceCards?: EvidenceCard[] };
 type PathTask = {
   id: string;
   title: string;
@@ -99,7 +120,9 @@ const PATH_REFLECTIONS_KEY = 'career_path_daily_reflections_v1';
 const PATH_CONVERSATION_ARCHIVES_KEY = 'career_path_conversation_archives_v1';
 const PATH_CAREER_EXPLORATION_KEY = 'career_path_career_exploration_checks_v1';
 const PATH_VISIBLE_PANELS_KEY = 'career_path_visible_panels_v1';
-const DEFAULT_VISIBLE_PANELS: PanelId[] = ['overview', 'tasks', 'reflection'];
+// 现实教练阶段隐藏的面板（探索焦点 / 任务列表 / 今日觉察 / 探索入口），后期由行动力教练启用
+const HIDDEN_PANEL_IDS: PanelId[] = ['overview', 'tasks', 'reflection', 'exploration'];
+const DEFAULT_VISIBLE_PANELS: PanelId[] = [];
 const ALL_PANEL_IDS: PanelId[] = ['overview', 'tasks', 'reflection', 'calendar', 'modules', 'exploration', 'profile', 'updates'];
 
 const CAREER_EXPLORATION_STEPS: Array<{ id: CareerExplorationCheckId; title: string; description: string }> = [
@@ -675,157 +698,188 @@ function PathModule({
   );
 }
 
-function WorkProfileBoard({ profile, hasConversation }: { profile: PathMapPreview['work_profile']; hasConversation: boolean }) {
-  const dimensions = [
-    { label: '喜欢解决什么问题', value: profile.preferred_problems, icon: Search },
-    { label: '倾向如何工作', value: profile.work_style, icon: BriefcaseBusiness },
-    { label: '为谁创造什么价值', value: profile.value_for, icon: Users },
-  ];
+const EVIDENCE_STATUS_META: Record<EvidenceCard['status'], { label: string; className: string }> = {
+  pending: { label: '待你确认', className: 'bg-amber-50 text-amber-700' },
+  confirmed: { label: '已证实', className: 'bg-emerald-50 text-emerald-700' },
+  partial: { label: '部分证实', className: 'bg-sky-50 text-sky-700' },
+  rejected: { label: '不成立', className: 'bg-slate-100 text-slate-500' },
+};
 
+/** 对话内可交互的证据确认卡：三出口（准确 / 补充 / 不准确） */
+function EvidenceConfirmCard({
+  card,
+  onConfirm,
+  onSupplement,
+  onReject,
+}: {
+  card: EvidenceCard;
+  onConfirm: () => void;
+  onSupplement: (amendment: string) => void;
+  onReject: () => void;
+}) {
+  const [supplementing, setSupplementing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const meta = EVIDENCE_STATUS_META[card.status];
+  const proficiency = PROFICIENCY_META[card.proficiency];
   return (
-    <section className="rounded-[1.6rem] border border-[#86B8FF]/18 bg-white/78 p-5 shadow-[0_18px_50px_rgba(15,23,42,0.05)] backdrop-blur md:p-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 text-sm font-semibold text-[#2A6FA3]">
-            <Target className="h-4 w-4 text-sky-500" />
-            你的职业特征
-          </div>
-          <p className="mt-2 text-sm leading-6 text-slate-500">
-            {hasConversation ? '这是结合天赋报告与现实路径对话持续整理的工作画像。' : '这是根据天赋报告和已有对话生成的初步画像，后续会继续校准。'}
-          </p>
-          <span className="mt-3 inline-flex rounded-full bg-[#F3F8FF] px-3 py-1 text-xs font-semibold text-[#2A6FA3]">
-            {hasConversation ? '已加入现实对话线索' : '初始判断 · 来自天赋报告'}
-          </span>
+    <div className="mt-2 w-full rounded-2xl border border-[#86B8FF]/30 bg-white/95 p-3.5 text-sm shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-[#2A6FA3]">
+          <ClipboardCheck className="h-3.5 w-3.5 text-sky-500" />
+          能力证据确认卡
         </div>
+        <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${meta.className}`}>{meta.label}</span>
       </div>
-      <div className="mt-4 grid gap-3 lg:grid-cols-3">
-        {dimensions.map((dimension) => (
-          <div key={dimension.label} className="rounded-2xl border border-[#86B8FF]/14 bg-[#F3F8FF]/55 p-4">
-            <div className="flex items-center gap-2 text-xs font-semibold text-[#2A6FA3]">
-              <dimension.icon className="h-4 w-4 text-sky-500" />
-              {dimension.label}
+      <div className="mt-2.5 font-semibold text-[#2A6FA3]">{card.capability}</div>
+      <div className="mt-2 grid gap-1.5 leading-6 text-slate-700">
+        <div><span className="font-semibold text-slate-500">你的经历：</span>{card.experienceSummary}</div>
+        <div><span className="font-semibold text-slate-500">可复用能力：</span>{card.reusableAbility}</div>
+        <div><span className="font-semibold text-slate-500">岗位动作：</span>{card.targetAction}</div>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+        <span className="rounded-full bg-[#F3F8FF] px-2.5 py-1 font-semibold text-[#2A6FA3]" title={proficiency.hint}>{proficiency.label}</span>
+        {card.artifact ? <span className="rounded-full bg-slate-50 px-2.5 py-1">可展示：{card.artifact}</span> : null}
+      </div>
+      {card.status === 'pending' ? (
+        supplementing ? (
+          <div className="mt-3 rounded-xl border border-[#B9D8F2]/80 bg-[#F3F8FF]/70 p-3">
+            <div className="text-xs font-semibold text-[#47708F]">哪里不准确，或者你想补充什么？教练会按你的修正重新记录。</div>
+            <textarea
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              rows={2}
+              placeholder="例如：这件事是团队一起做的，我只是参与其中。"
+              className="mt-2 w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm leading-6 text-slate-700 outline-none placeholder:text-slate-400 focus:border-[#86B8FF] focus:ring-2 focus:ring-[#86B8FF]/20"
+            />
+            <div className="mt-2 flex gap-2">
+              <Button
+                size="sm"
+                className="rounded-full bg-[#86B8FF]/85 text-[#225F91] shadow-sm hover:bg-[#78AAEE]"
+                disabled={!draft.trim()}
+                onClick={() => {
+                  onSupplement(draft.trim());
+                  setSupplementing(false);
+                  setDraft('');
+                }}
+              >
+                提交补充
+              </Button>
+              <Button size="sm" variant="ghost" className="rounded-full text-slate-500 hover:bg-white/80" onClick={() => { setSupplementing(false); setDraft(''); }}>
+                返回
+              </Button>
             </div>
-            <p className="mt-2 text-sm leading-6 text-slate-700">{dimension.value}</p>
           </div>
-        ))}
-      </div>
-    </section>
+        ) : (
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button size="sm" className="rounded-full bg-[#86B8FF]/85 text-[#225F91] shadow-sm hover:bg-[#78AAEE]" onClick={onConfirm}>这条准确</Button>
+            <Button size="sm" variant="outline" className="rounded-full border-[#B9D8F2] bg-white/80 text-[#47708F]" onClick={() => setSupplementing(true)}>我想补充</Button>
+            <Button size="sm" variant="ghost" className="rounded-full text-slate-500 hover:bg-white/80" onClick={onReject}>不太准确</Button>
+          </div>
+        )
+      ) : card.status === 'partial' && card.userAmendment ? (
+        <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50/80 px-3 py-2 text-xs leading-6 text-sky-900">
+          按你的补充记录：{card.userAmendment}
+        </div>
+      ) : card.status === 'confirmed' ? (
+        <div className="mt-3 flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          已证实，沉淀为路径证据。
+        </div>
+      ) : card.status === 'rejected' ? (
+        <div className="mt-3 flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+          <X className="h-3.5 w-3.5" />
+          已记录为不成立，教练不会再引用这条证据。
+        </div>
+      ) : null}
+    </div>
   );
 }
 
-type DemoEvidenceMode = 'idle' | 'supplement' | 'submittedSupplement';
-
-function CapabilityEvidenceProgressDemo({ confirmed, mode }: { confirmed: boolean; mode: DemoEvidenceMode }) {
-  const statusLabel = confirmed
-    ? '已确认'
-    : mode === 'supplement' || mode === 'submittedSupplement'
-      ? '待补充'
-      : '待你确认';
+/** 证据进度面板：数据驱动的证据卡总览 + 现实约束 */
+function EvidenceProgressPanel({ cards, constraints }: { cards: EvidenceCard[]; constraints: RealityConstraints }) {
+  const confirmedCount = cards.filter((card) => card.status === 'confirmed' || card.status === 'partial').length;
+  const pendingCount = cards.filter((card) => card.status === 'pending').length;
+  const hasConstraints = Boolean(
+    constraints.weeklyHours?.trim() || constraints.financialRunway?.trim() || constraints.hardNo.length || constraints.selfInitiated.length
+  );
   return (
     <section className="rounded-[1.6rem] border border-[#86B8FF]/22 bg-white/82 p-5 shadow-[0_18px_50px_rgba(134,184,255,0.12)] backdrop-blur md:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2 text-sm font-semibold text-[#2A6FA3]">
             <ClipboardCheck className="h-4 w-4 text-sky-500" />
-            示范：能力迁移进度
+            能力证据进度
           </div>
-          <p className="mt-2 text-sm leading-6 text-slate-500">看一条能力证据如何从待确认变成已确认。实际核对数量会根据岗位动态确定，通常是 3–5 项。</p>
+          <p className="mt-2 text-sm leading-6 text-slate-500">教练从你的真实经历里提炼可复用能力，逐条与你确认后沉淀为路径证据。实际核对数量根据岗位动态确定，通常是 3–5 项。</p>
         </div>
         <span className="rounded-full bg-[#F3F8FF] px-3 py-1 text-xs font-semibold text-[#2A6FA3]">
-          产品经理 · {confirmed ? '已确认 1 项' : '当前核对第 1 项'}
+          {cards.length ? `已证实 ${confirmedCount} 项 · 待确认 ${pendingCount} 项` : '尚未开始核对'}
         </span>
       </div>
-      <div className="mt-4 rounded-2xl border border-[#86B8FF]/20 bg-[#F3F8FF]/60 p-4">
-        <div className="flex items-center justify-between gap-3">
-          <div className="text-sm font-semibold text-[#2A6FA3]">识别问题与需求归因</div>
-          <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${confirmed ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-            {statusLabel}
-          </span>
-        </div>
-        <div className="mt-3 grid gap-2 text-sm leading-6 text-slate-700">
-          <div><span className="font-semibold text-slate-500">你的经历：</span>整理用户反馈并提出改进方案。</div>
-          <div><span className="font-semibold text-slate-500">可复用能力：</span>识别真实问题、归因核心卡点。</div>
-          <div><span className="font-semibold text-slate-500">岗位动作：</span>把模糊诉求转成可执行需求。</div>
-        </div>
-      </div>
-      <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
-        <span className={`h-2 w-2 rounded-full ${confirmed ? 'bg-emerald-400' : 'bg-amber-300'}`} />
-        {confirmed ? '确认后才进入下一项能力核对。' : mode === 'idle' ? '右侧对话确认后，这条才会变成已证实。' : '教练会根据你的补充重新整理这条线索。'}
-      </div>
-    </section>
-  );
-}
-
-function CapabilityEvidenceCoachDemo({
-  confirmed,
-  mode,
-  draft,
-  onDraftChange,
-  onConfirm,
-  onChooseSupplement,
-  onSubmitFeedback,
-  onReset,
-}: {
-  confirmed: boolean;
-  mode: DemoEvidenceMode;
-  draft: string;
-  onDraftChange: (value: string) => void;
-  onConfirm: () => void;
-  onChooseSupplement: () => void;
-  onSubmitFeedback: () => void;
-  onReset: () => void;
-}) {
-  return (
-    <div className="rounded-2xl border border-[#B9D8F2]/70 bg-[#F2F8FF] px-4 py-4 text-sm leading-7 text-slate-700 shadow-sm">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <span className="text-xs font-semibold uppercase tracking-[0.16em] text-[#2A6FA3]">能力证据确认示范</span>
-      </div>
-      <p>你刚才提到，自己经常整理用户反馈、判断问题原因，还会把模糊诉求整理成具体改进方案。</p>
-      <p className="mt-3">我先这样理解：这段经历已经体现出你在<strong className="font-semibold text-[#2A6FA3]">识别真实问题、归因核心卡点、把模糊诉求转成可执行需求</strong>。放到产品经理岗位里，对应的是需求分析和问题定义。</p>
-      <p className="mt-3 font-semibold text-[#2A6FA3]">这条理解准确吗？</p>
-      {confirmed ? (
-        <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-xs text-emerald-700">
-          <span className="flex items-center gap-1.5"><CheckCircle2 className="h-4 w-4" />已确认，进入下一项能力</span>
-          <button type="button" className="font-semibold underline underline-offset-2" onClick={onReset}>重新看示范</button>
-        </div>
-      ) : mode === 'submittedSupplement' ? (
-        <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50/80 p-3 text-sm leading-6 text-sky-900">
-          <div className="text-xs font-semibold text-sky-700">根据你的补充，我重新整理了一版：</div>
-          <p className="mt-2 rounded-lg bg-white/75 px-3 py-2 text-slate-700">“{draft}”</p>
-          <p className="mt-2">这说明你不只是整理信息，还参与了方案推进和结果验证。放到产品经理岗位里，对应的是从问题识别到方案落地的完整推进。</p>
-          <p className="mt-2 font-semibold text-[#2A6FA3]">这版理解更接近你的实际经历吗？</p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <Button size="sm" className="rounded-full bg-[#86B8FF]/85 text-[#225F91] shadow-sm hover:bg-[#78AAEE]" onClick={onConfirm}>确认这版</Button>
-            <Button size="sm" variant="outline" className="rounded-full border-[#B9D8F2] bg-white/80 text-[#47708F]" onClick={onChooseSupplement}>继续补充</Button>
-            <Button size="sm" variant="ghost" className="rounded-full text-slate-500 hover:bg-white/70" onClick={onReset}>重新看示范</Button>
-          </div>
-        </div>
-      ) : mode === 'supplement' ? (
-        <div className="mt-3 rounded-xl border border-[#B9D8F2]/80 bg-white/80 p-3">
-          <div className="text-xs font-semibold text-[#47708F]">
-            补充这段经历里你亲自做了什么，或产生了什么结果。
-          </div>
-          <textarea
-            value={draft}
-            onChange={(event) => onDraftChange(event.target.value)}
-            rows={2}
-            placeholder="例如：我还负责推动设计和研发一起上线，并跟踪了反馈变化。"
-            className="mt-2 w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm leading-6 text-slate-700 outline-none placeholder:text-slate-400 focus:border-[#86B8FF] focus:ring-2 focus:ring-[#86B8FF]/20"
-          />
-          <div className="mt-2 flex gap-2">
-            <Button size="sm" className="rounded-full bg-[#86B8FF]/85 text-[#225F91] shadow-sm hover:bg-[#78AAEE]" disabled={!draft.trim()} onClick={onSubmitFeedback}>
-              提交补充
-            </Button>
-            <Button size="sm" variant="ghost" className="rounded-full text-slate-500 hover:bg-slate-100" onClick={onReset}>返回确认</Button>
-          </div>
+      {cards.length ? (
+        <div className="mt-4 space-y-3">
+          {cards.map((card) => {
+            const meta = EVIDENCE_STATUS_META[card.status];
+            const proficiency = PROFICIENCY_META[card.proficiency];
+            return (
+              <div key={card.id} className="rounded-2xl border border-[#86B8FF]/20 bg-[#F3F8FF]/60 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-semibold text-[#2A6FA3]">{card.capability}</div>
+                  <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${meta.className}`}>{meta.label}</span>
+                </div>
+                <div className="mt-2 grid gap-1 text-sm leading-6 text-slate-700">
+                  <div><span className="font-semibold text-slate-500">经历：</span>{card.experienceSummary}</div>
+                  <div><span className="font-semibold text-slate-500">可复用能力：</span>{card.reusableAbility}</div>
+                  <div><span className="font-semibold text-slate-500">岗位动作：</span>{card.targetAction}</div>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                  <span className="rounded-full bg-white/85 px-2.5 py-1 font-semibold text-[#2A6FA3]" title={proficiency.hint}>{proficiency.label}</span>
+                  {card.artifact ? <span className="rounded-full bg-white/85 px-2.5 py-1">可展示：{card.artifact}</span> : null}
+                </div>
+                {card.status === 'partial' && card.userAmendment ? (
+                  <div className="mt-2 text-xs leading-5 text-sky-800">按你的补充记录：{card.userAmendment}</div>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
       ) : (
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Button size="sm" className="rounded-full bg-[#86B8FF]/85 text-[#225F91] shadow-sm hover:bg-[#78AAEE]" onClick={onConfirm}>这条准确</Button>
-          <Button size="sm" variant="outline" className="rounded-full border-[#B9D8F2] bg-white/80 text-[#47708F]" onClick={onChooseSupplement}>我想补充</Button>
+        <div className="mt-4 rounded-2xl border border-dashed border-[#86B8FF]/30 bg-[#F3F8FF]/50 px-4 py-5 text-sm leading-6 text-slate-400">
+          教练还没有从对话里提炼出能力证据。聊一段具体的工作经历后，这里会出现第一张证据卡。
         </div>
       )}
-    </div>
+      <div className="mt-5 rounded-2xl border border-slate-200/70 bg-slate-50/70 p-4">
+        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#7A97B5]">
+          <Clock3 className="h-3.5 w-3.5" />
+          现实约束
+        </div>
+        {hasConstraints ? (
+          <div className="mt-3 grid gap-2 text-sm leading-6 text-slate-700">
+            {constraints.weeklyHours?.trim() ? <div><span className="font-semibold text-slate-500">时间预算：</span>{constraints.weeklyHours}</div> : null}
+            {constraints.financialRunway?.trim() ? <div><span className="font-semibold text-slate-500">收入断档缓冲：</span>{constraints.financialRunway}</div> : null}
+            {constraints.paceIntent?.trim() ? <div><span className="font-semibold text-slate-500">节奏意图：</span>{constraints.paceIntent}</div> : null}
+            {constraints.hardNo.length ? (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="font-semibold text-slate-500">绝对不做：</span>
+                {constraints.hardNo.map((item) => (
+                  <span key={item} className="rounded-full border border-[#F0DADA] bg-[#FBF3F3] px-2.5 py-1 text-xs text-[#A06B6B]">{item}</span>
+                ))}
+              </div>
+            ) : null}
+            {constraints.selfInitiated.length ? (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="font-semibold text-slate-500">已经在做：</span>
+                {constraints.selfInitiated.map((item) => (
+                  <span key={item} className="rounded-full border border-[#D8E8DC] bg-[#F2F8F3] px-2.5 py-1 text-xs text-[#5E8A70]">{item}</span>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <p className="mt-2 text-sm leading-6 text-slate-400">和教练聊交付形态时，会一起确认你的时间预算、收入缓冲和"绝对不做"清单。</p>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -1231,62 +1285,95 @@ function MobilePanel({
   );
 }
 
-function TaskListCard({
-  tasks,
+function ActionCenterCard({
   locked,
+  mainlineTitle,
+  ownedAbility,
+  readinessScore,
+  tasks,
   onToggleTask,
 }: {
-  tasks: PathTask[];
   locked: boolean;
+  /** 主线：教练和用户确认要走的那条路径 */
+  mainlineTitle: string | null;
+  /** 已经拥有的能力（证据里的一句话） */
+  ownedAbility: string | null;
+  readinessScore: number | null;
+  tasks: PathTask[];
   onToggleTask: (taskId: string) => void;
 }) {
   const stats = getTaskStats(tasks);
   return (
-    <Card className="rounded-[1.6rem] border border-[#86B8FF]/18 bg-white/82 shadow-[0_18px_50px_rgba(15,23,42,0.05)] backdrop-blur">
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div>
+    <Card className="rounded-[1.6rem] border border-[#86B8FF]/26 bg-[linear-gradient(180deg,rgba(243,248,255,0.96)_0%,rgba(255,255,255,0.88)_100%)] shadow-[0_18px_50px_rgba(134,184,255,0.16)] backdrop-blur">
+      <CardContent className="p-0">
+        {/* 顶部只保留两层信息：主线 + 已拥有能力 */}
+        <div className="px-5 pb-4 pt-5 sm:px-6">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#7A97B5]">
+            <Compass className="h-3.5 w-3.5" />
+            主线
+          </div>
+          <h2 className="mt-2 text-2xl font-bold tracking-tight text-[#2A6FA3]">
+            {locked ? '完成天赋报告后生成' : (mainlineTitle || '还没有选定主线')}
+          </h2>
+          {!locked && ownedAbility ? (
+            <p className="mt-1.5 text-sm leading-6 text-[#4A789C]">
+              <span className="font-semibold text-[#5E8A70]">你已经拥有</span> {ownedAbility}
+            </p>
+          ) : null}
+        </div>
+
+        <div className="border-t border-[#86B8FF]/18" />
+
+        {/* 主体：行动清单 */}
+        <div className="px-5 pb-5 pt-4 sm:px-6">
+          <div className="flex items-center gap-2">
             <div className="flex items-center gap-2 text-sm font-semibold text-[#2A6FA3]">
               <ClipboardCheck className="h-4 w-4 text-sky-500" />
-              任务列表
+              行动清单
             </div>
-            <p className="mt-2 text-xs leading-6 text-slate-500">
-              只收纳教练和你确认过的微行动，完成后打勾。
-            </p>
+            <div className="ml-auto flex items-center gap-2">
+              {readinessScore !== null ? (
+                <span className="rounded-full border border-[#86B8FF]/30 bg-white/80 px-2.5 py-0.5 text-[11px] font-semibold text-[#2A6FA3]">
+                  准备度 {readinessScore}
+                </span>
+              ) : null}
+              <Badge variant="secondary" className="bg-[#86B8FF]/14 text-[#2A6FA3]">
+                {stats.completed}/{tasks.length || 0}
+              </Badge>
+            </div>
           </div>
-          <Badge variant="secondary" className="bg-[#86B8FF]/14 text-[#2A6FA3]">
-            {stats.completed}/{tasks.length || 0}
-          </Badge>
-        </div>
+          <p className="mt-1 text-xs leading-5 text-[#7A97B5]">
+            只收纳教练和你确认过的微行动，完成后打勾。
+          </p>
 
-        <div className="mt-4 space-y-2">
-          {tasks.length ? tasks.map((task) => (
-            <label
-              key={task.id}
-              className={`flex cursor-pointer items-start gap-3 rounded-2xl border px-3 py-3 text-sm leading-6 transition-colors ${
-                task.completedAt
-                  ? 'border-emerald-100 bg-emerald-50/70 text-slate-500'
-                  : 'border-[#86B8FF]/18 bg-white/78 text-slate-700 hover:bg-[#F3F8FF]'
-              }`}
-            >
-              <input
-                type="checkbox"
-                checked={Boolean(task.completedAt)}
-                disabled={locked}
-                onChange={() => onToggleTask(task.id)}
-                className="mt-1 h-4 w-4 rounded border-[#86B8FF]/45 text-[#2A6FA3] focus:ring-[#86B8FF]"
-              />
-              <span className={task.completedAt ? 'line-through decoration-emerald-500/55' : ''}>
-                {task.title}
-              </span>
-            </label>
-          )) : (
-            <div className="rounded-2xl border border-dashed border-[#86B8FF]/25 bg-[#F3F8FF]/55 px-4 py-5 text-sm leading-7 text-slate-500">
-              和教练确认的下一步，会记录在这里。
-            </div>
-          )}
+          <div className="mt-3 space-y-2">
+            {tasks.length ? tasks.map((task) => (
+              <label
+                key={task.id}
+                className={`flex cursor-pointer items-start gap-3 rounded-2xl border px-4 py-3.5 text-sm leading-6 transition-colors ${
+                  task.completedAt
+                    ? 'border-emerald-100 bg-emerald-50/70 text-slate-500'
+                    : 'border-[#86B8FF]/22 bg-white/85 text-slate-700 hover:bg-[#F3F8FF]'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={Boolean(task.completedAt)}
+                  disabled={locked}
+                  onChange={() => onToggleTask(task.id)}
+                  className="mt-1 h-4 w-4 rounded border-[#86B8FF]/45 text-[#2A6FA3] focus:ring-[#86B8FF]"
+                />
+                <span className={task.completedAt ? 'line-through decoration-emerald-500/55' : ''}>
+                  {task.title}
+                </span>
+              </label>
+            )) : (
+              <div className="rounded-2xl border border-dashed border-[#86B8FF]/25 bg-white/60 px-4 py-5 text-sm leading-7 text-slate-500">
+                和教练确认的下一步，会记录在这里。
+              </div>
+            )}
+          </div>
         </div>
-
       </CardContent>
     </Card>
   );
@@ -1912,6 +1999,216 @@ function splitHighlightPunctuation(text: string) {
   return { leading: match[1], core: match[2], trailing: match[3] };
 }
 
+type PathStep = 1 | 2 | 3;
+
+/** Step 2 需求对照面板：主线岗位需求逐项对照已有证据（教练输出 [[REQUIREMENT]] 标记后落位） */
+function RequirementFocusPanel({ brief }: { brief: SelectedPathBrief }) {
+  const checks = brief.requirementChecks;
+  const checkedCount = checks.filter((check) => check.status === 'checked').length;
+  const willingnessLabel =
+    brief.willingness === 'want'
+      ? '想做'
+      : brief.willingness === 'unsure'
+        ? '观望'
+        : brief.willingness === 'no'
+          ? '不想做 · 回 Step 1 换路径'
+          : null;
+  return (
+    <Card className="rounded-[1.6rem] border border-[#86B8FF]/26 bg-[linear-gradient(180deg,rgba(243,248,255,0.96)_0%,rgba(255,255,255,0.86)_100%)] shadow-[0_18px_50px_rgba(134,184,255,0.15)] backdrop-blur">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex flex-wrap items-center gap-2 text-base font-semibold text-[#2A6FA3]">
+          <Target className="h-4 w-4" />
+          Step 2 · 信息聚焦
+          <span className="rounded-full bg-[#F3F8FF] px-2 py-0.5 text-[11px] font-semibold text-[#4A789C]">
+            主线：{brief.pathTitle}
+          </span>
+          {checks.length ? (
+            <span className="ml-auto text-[11px] font-medium text-[#7A97B5]">
+              已有证据 {checkedCount}/{checks.length}
+            </span>
+          ) : null}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {checks.length === 0 ? (
+          <p className="rounded-2xl border border-dashed border-[#86B8FF]/40 bg-white/60 px-4 py-3 text-xs leading-6 text-[#7A97B5]">
+            教练正在提炼这条路径最看重的岗位需求，逐项对照会出现在这里——已经证实过的能力会直接对上，不用重新讲一遍经历。
+          </p>
+        ) : (
+          checks.map((check) => {
+            const statusMeta = REQUIREMENT_STATUS_META[check.status];
+            return (
+              <div key={check.requirement} className="rounded-2xl border border-[#86B8FF]/20 bg-white/75 px-4 py-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-semibold text-[#2A6FA3]">{check.requirement}</span>
+                  <span className={`ml-auto shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${statusMeta.className}`}>
+                    {statusMeta.label}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs leading-6 text-[#4A789C]">
+                  {check.evidenceSummary || '还没有这方面的证据线索——想到相关经历时随时告诉教练。'}
+                </p>
+              </div>
+            );
+          })
+        )}
+        {brief.valueNotes.length ? (
+          <div className="rounded-2xl border border-[#D8E8DC] bg-[#F2F8F3]/70 px-4 py-3">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#5E8A70]">价值观对照小结</div>
+            <ul className="mt-1 space-y-1">
+              {brief.valueNotes.map((note) => (
+                <li key={note} className="text-xs leading-6 text-[#4A789C]">· {note}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {willingnessLabel ? (
+          <div className="text-right text-[11px] font-medium text-[#7A97B5]">意愿状态：{willingnessLabel}</div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Step 3 准备度卡：综合准备度 + 已具备 / 仍需验证 / 下一步（教练输出 [[READINESS]] 标记后落位） */
+function ReadinessPanel({ readiness }: { readiness: ReadinessSummary }) {
+  const columns: Array<{ title: string; items: string[]; className: string; text: string }> = [
+    { title: '已具备', items: readiness.have, className: 'border-[#D8E8DC] bg-[#F2F8F3]/70', text: 'text-[#5E8A70]' },
+    { title: '仍需验证', items: readiness.verify, className: 'border-[#D5E6F5] bg-[#F3F8FF]/70', text: 'text-[#4A789C]' },
+    { title: '下一步', items: readiness.next, className: 'border-[#E8E2D5] bg-[#FAF7F0]/80', text: 'text-[#8A7A5E]' },
+  ];
+  return (
+    <Card className="rounded-[1.6rem] border border-[#86B8FF]/26 bg-[linear-gradient(180deg,rgba(243,248,255,0.96)_0%,rgba(255,255,255,0.86)_100%)] shadow-[0_18px_50px_rgba(134,184,255,0.15)] backdrop-blur">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex flex-wrap items-center gap-2 text-base font-semibold text-[#2A6FA3]">
+          <ClipboardCheck className="h-4 w-4" />
+          Step 3 · 行动收束
+          <span className="ml-auto flex items-baseline gap-1">
+            <span className="text-2xl font-bold text-[#2A6FA3]">{readiness.score}</span>
+            <span className="text-xs font-medium text-[#7A97B5]">/100 准备度</span>
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="grid gap-2 md:grid-cols-3">
+          {columns.map((column) => (
+            <div key={column.title} className={`rounded-2xl border px-4 py-3 ${column.className}`}>
+              <div className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${column.text}`}>{column.title}</div>
+              {column.items.length ? (
+                <ul className="mt-1.5 space-y-1.5">
+                  {column.items.map((item) => (
+                    <li key={item} className="text-xs leading-6 text-[#4A789C]">· {item}</li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="mt-1.5 text-xs leading-6 text-[#A9BDD1]">暂无</div>
+              )}
+            </div>
+          ))}
+        </div>
+        <p className="mt-2 text-[11px] leading-5 text-[#A9BDD1]">
+          分数只来自你已确认的证据——它衡量的是"现在能拿出什么"，不是"你这个人行不行"。
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+const PATH_STEP_META: Record<PathStep, { label: string; subtitle: string }> = {
+  1: { label: '路径积木', subtitle: '拆理想职业，碰撞现实可能路径' },
+  2: { label: '信息聚焦', subtitle: '选定路径拆解：能力 / 意愿 / 价值观' },
+  3: { label: '行动收束', subtitle: '综合准备度 + 剩下 30% 最小行动' },
+};
+
+function PathStepIndicator({
+  currentStep,
+  completedSteps,
+  displayedStep,
+  onSelect,
+}: {
+  currentStep: PathStep;
+  completedSteps: PathStep[];
+  displayedStep: PathStep;
+  onSelect: (step: PathStep) => void;
+}) {
+  const steps: PathStep[] = [1, 2, 3];
+  return (
+    <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-0">
+      {steps.map((step, idx) => {
+        const isCurrent = step === currentStep;
+        const isCompleted = completedSteps.includes(step);
+        const isDisplayed = step === displayedStep;
+        const isClickable = isCurrent || isCompleted;
+        const meta = PATH_STEP_META[step];
+        const stateLabel = isCurrent ? '进行中' : isCompleted ? '已完成' : '未解锁';
+        return (
+          <div key={step} className="flex flex-1 items-center md:gap-0">
+            <button
+              type="button"
+              onClick={() => onSelect(step)}
+              disabled={!isClickable}
+              aria-current={isDisplayed ? 'step' : undefined}
+              className={`group flex flex-1 items-center gap-3 rounded-2xl border px-4 py-3 text-left transition ${
+                isDisplayed
+                  ? 'border-[#86B8FF]/60 bg-[linear-gradient(180deg,rgba(243,248,255,0.98)_0%,rgba(255,255,255,0.9)_100%)] shadow-[0_12px_30px_rgba(134,184,255,0.18)]'
+                  : isClickable
+                    ? 'border-[#86B8FF]/22 bg-white/70 hover:border-[#86B8FF]/40 hover:bg-white/85'
+                    : 'cursor-not-allowed border-slate-200/70 bg-slate-50/50 opacity-60'
+              }`}
+            >
+              <span
+                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${
+                  isCompleted
+                    ? 'bg-emerald-500 text-white'
+                    : isCurrent
+                      ? 'bg-[#2A6FA3] text-white'
+                      : 'bg-slate-200 text-slate-500'
+                }`}
+                aria-hidden
+              >
+                {isCompleted ? '✓' : step}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold text-slate-800">
+                  Step {step} · {meta.label}
+                </span>
+                <span className="mt-0.5 block truncate text-xs text-slate-500">{meta.subtitle}</span>
+              </span>
+              <span
+                className={`ml-2 shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                  isCurrent
+                    ? 'bg-[#2A6FA3]/10 text-[#2A6FA3]'
+                    : isCompleted
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : 'bg-slate-200/70 text-slate-500'
+                }`}
+              >
+                {stateLabel}
+              </span>
+            </button>
+            {idx < steps.length - 1 ? (
+              <div
+                aria-hidden
+                className={`mx-1 hidden h-px w-6 shrink-0 md:block ${
+                  isCompleted || isCurrent ? 'bg-[#86B8FF]/60' : 'bg-slate-200'
+                }`}
+              />
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function PathStepContent({ step, children }: { step: PathStep; children: React.ReactNode }) {
+  return (
+    <div data-path-step={step} className="space-y-6">
+      {children}
+    </div>
+  );
+}
+
 export default function PathPage() {
   const router = useRouter();
   const [report, setReport] = useState<CareerReport | null>(null);
@@ -1933,13 +2230,31 @@ export default function PathPage() {
   const [selectedCalendarDate, setSelectedCalendarDate] = useState(() => toDateKey(new Date()));
   const [boardSummary, setBoardSummary] = useState<PathBoardSummary | null>(null);
   const [pendingBoardSummary, setPendingBoardSummary] = useState<PathBoardSummary | null>(null);
-  const [demoEvidenceConfirmed, setDemoEvidenceConfirmed] = useState(false);
-  const [demoEvidenceMode, setDemoEvidenceMode] = useState<DemoEvidenceMode>('idle');
-  const [demoEvidenceDraft, setDemoEvidenceDraft] = useState('');
+  const [evidenceCards, setEvidenceCards] = useState<EvidenceCard[]>([]);
+  const [realityConstraints, setRealityConstraints] = useState<RealityConstraints>(EMPTY_CONSTRAINTS);
   const [archiveUpdatedAt, setArchiveUpdatedAt] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [selectedExplorationRole, setSelectedExplorationRole] = useState('');
   const [explorationChecksByRole, setExplorationChecksByRole] = useState<Record<string, CareerExplorationCheckId[]>>({});
+  // Phase A: 横向步骤条 + 当前 Step 主区域
+  const [currentStep, setCurrentStep] = useState<PathStep>(2);
+  const [completedSteps, setCompletedSteps] = useState<PathStep[]>([]);
+  const [viewingStep, setViewingStep] = useState<PathStep | null>(null); // null = 看当前 step
+  const displayedStep: PathStep = viewingStep ?? currentStep;
+  // 测试模式（仅开发环境）：加载预置画像，跳过天赋教练环节
+  const [testModeEnabled, setTestModeEnabled] = useState(false);
+  const [activeTestPersona, setActiveTestPersona] = useState<PathTestPersona | null>(null);
+  // 演示对话播放（测试模式）：自动流入预置脚本，验证证据卡解析与确认联动
+  const [demoPlaying, setDemoPlaying] = useState(false);
+  const demoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 积木②交付形态：演示对话确认后同步（真实用户后续由教练确认流写入）
+  const [confirmedDeliveryFormat, setConfirmedDeliveryFormat] = useState<DeliveryFormat | null>(null);
+  // Step 2/3：选定主线快照与准备度（会话内状态，与证据卡一致不持久化）
+  const [selectedBrief, setSelectedBrief] = useState<SelectedPathBrief | null>(null);
+  const [readiness, setReadiness] = useState<ReadinessSummary | null>(null);
+  const isDevEnvironment = process.env.NODE_ENV !== 'production';
+  const showTestEntry = isDevEnvironment;
   const [visiblePanels, setVisiblePanels] = useState<PanelId[]>(DEFAULT_VISIBLE_PANELS);
   const [expandedPanels, setExpandedPanels] = useState<Record<PanelId, boolean>>({
     overview: true,
@@ -1953,12 +2268,56 @@ export default function PathPage() {
   });
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
 
+  // 测试模式：加载预置画像，跳过天赋教练环节
+  const loadTestPersona = (persona: PathTestPersona) => {
+    setActiveTestPersona(persona);
+    setReport(persona.report);
+    setLocked(false);
+    // 交付形态尚未确认，Step 1 路径积木是当前主线
+    setCurrentStep(1);
+    setCompletedSteps([]);
+    setViewingStep(null);
+    // 种子数据：画像自带的能力证据卡与现实约束（pending 卡挂在开场白上，可直接确认）
+    setEvidenceCards(persona.evidenceCards);
+    setRealityConstraints(persona.realityConstraints);
+    setConfirmedDeliveryFormat(null);
+    setSelectedBrief(null);
+    setReadiness(null);
+    stopDemoConversation();
+    setMessages([
+      {
+        role: 'assistant',
+        content: `你好，${persona.name}。我已经读完你的天赋报告。你之前在思考"${persona.idealRoles.join('、')}"。我们先把理想职业拆成三块积木：天赋动作、交付形态、利基主题——左侧的象限图里已经放了几个现实组合，你可以点开看看。积木①和③报告里已经有初步判断，我们先聊积木②交付形态：比起工位和打卡，你更能接受哪种"钱从哪里来"的方式？`,
+        evidenceCards: persona.evidenceCards.filter((card) => card.status === 'pending'),
+      },
+    ]);
+    const nextPreview = buildPathMapPreview(persona.report, []);
+    setPreview(nextPreview);
+    const initialBoard = buildInitialBoardSummary(persona.report, nextPreview);
+    setBoardSummary(initialBoard);
+  };
+
+  const exitTestMode = () => {
+    setTestModeEnabled(false);
+    setActiveTestPersona(null);
+    stopDemoConversation();
+    window.location.reload();
+  };
+
+  useEffect(() => () => stopDemoConversation(), []);
+
   useEffect(() => {
     const load = async () => {
+      // 真实用户模式：证据卡与现实约束从空开始，由教练对话逐步生成
+      setEvidenceCards([]);
+      setRealityConstraints(EMPTY_CONSTRAINTS);
       try {
         const savedVisiblePanels = JSON.parse(window.localStorage.getItem(PATH_VISIBLE_PANELS_KEY) || '[]') as PanelId[];
-        const validVisiblePanels = savedVisiblePanels.filter((panelId) => ALL_PANEL_IDS.includes(panelId));
-        if (validVisiblePanels.length) setVisiblePanels(validVisiblePanels);
+        // 过滤掉现实教练阶段隐藏的面板（历史存储里可能有 overview/tasks/reflection）
+        const validVisiblePanels = savedVisiblePanels.filter(
+          (panelId) => ALL_PANEL_IDS.includes(panelId) && !HIDDEN_PANEL_IDS.includes(panelId)
+        );
+        setVisiblePanels(validVisiblePanels);
       } catch {
         setVisiblePanels(DEFAULT_VISIBLE_PANELS);
       }
@@ -2049,7 +2408,7 @@ export default function PathPage() {
   const currentExplorationRole = selectedExplorationRole || topRoles[0] || boardSummary?.leastResistancePath || '待探索岗位';
   const currentExplorationChecks = explorationChecksByRole[currentExplorationRole] || [];
   const canSuggestBoardUpdate = hasEnoughEvidenceForPathUpdate(messages, currentExplorationChecks);
-  const panelModules: Array<{ id: PanelId; label: string; description: string; icon: React.ComponentType<{ className?: string }> }> = [
+  const allPanelModules: Array<{ id: PanelId; label: string; description: string; icon: React.ComponentType<{ className?: string }> }> = [
     { id: 'overview', label: '路径总览', description: '当前方向与下一步', icon: Compass },
     { id: 'tasks', label: '任务列表', description: '已确认的行动安排', icon: ClipboardCheck },
     { id: 'reflection', label: '今日觉察', description: '记录感受与发现', icon: Heart },
@@ -2059,6 +2418,7 @@ export default function PathPage() {
     { id: 'profile', label: '资料概览', description: '查看当前主线资料', icon: Target },
     { id: 'updates', label: '资料更新', description: '确认新的整理结果', icon: FilePenLine },
   ];
+  const panelModules = allPanelModules.filter((panel) => !HIDDEN_PANEL_IDS.includes(panel.id));
 
   useEffect(() => {
     if (!selectedExplorationRole && topRoles[0]) {
@@ -2122,14 +2482,235 @@ export default function PathPage() {
     router.push(href);
   };
 
+  // 证据卡三出口确认：同步更新总览面板与对话内卡片副本
+  const updateEvidenceCardStatus = (cardId: string, status: EvidenceCard['status'], userAmendment?: string) => {
+    const applyUpdate = (card: EvidenceCard): EvidenceCard => ({
+      ...card,
+      status,
+      userAmendment: userAmendment ?? (status === 'confirmed' || status === 'rejected' ? undefined : card.userAmendment),
+    });
+    setEvidenceCards((prev) => prev.map((card) => (card.id === cardId ? applyUpdate(card) : card)));
+    setMessages((prev) => prev.map((message) => {
+      if (!message.evidenceCards?.some((card) => card.id === cardId)) return message;
+      return {
+        ...message,
+        evidenceCards: message.evidenceCards.map((card) => (card.id === cardId ? applyUpdate(card) : card)),
+      };
+    }));
+  };
+
+  // 当前积木快照：报告提取看家本领（1-3 个）+ 画像行业赛道作利基 + 演示确认的交付形态覆盖
+  // 注意：利基主题只接受市场/行业/赛道语言（nicheThemes），direction_clusters 是岗位职能语言，不混入
+  const currentLegoProfile = () => {
+    if (!report) return null;
+    let niches: string[] = [];
+    if (activeTestPersona) {
+      niches = activeTestPersona.nicheThemes?.length
+        ? activeTestPersona.nicheThemes
+        : [activeTestPersona.nicheTheme];
+    }
+    const profile = buildLegoProfileFromReport(report, niches);
+    if (!profile) return null;
+    if (confirmedDeliveryFormat) profile.deliveryFormat = confirmedDeliveryFormat;
+    return profile;
+  };
+
+  // Step 2 解锁门槛（完成度门槛）：积木②确认 + 积木③确认 + 已证实证据卡 ≥2
+  const activeLegoProfile = currentLegoProfile();
+  const step2Unlocked = isStep2Unlocked(activeLegoProfile, evidenceCards);
+
+  // Step 条解锁联动：完成度门槛满足后自动推进（Step 1 → 2）
+  useEffect(() => {
+    if (locked) return;
+    if (step2Unlocked && currentStep === 1) {
+      setCompletedSteps((prev) => (prev.includes(1) ? prev : ([...prev, 1] as PathStep[])));
+      setCurrentStep(2);
+    }
+  }, [locked, step2Unlocked, currentStep]);
+
+  // Step 3 解锁：准备度卡出现（教练在意愿确认后输出），自动推进并把 1/2 标记为完成
+  useEffect(() => {
+    if (locked) return;
+    if (readiness && currentStep !== 3) {
+      setCompletedSteps((prev) => {
+        const next = prev.includes(1) ? prev : ([...prev, 1] as PathStep[]);
+        return next.includes(2) ? next : ([...next, 2] as PathStep[]);
+      });
+      setCurrentStep(3);
+    }
+  }, [locked, readiness, currentStep]);
+
+  // 行动力面板逐个激活：准备度卡 → 探索焦点；首个微行动 → 任务列表；第一次复盘 → 今日觉察
+  // （会话内激活：与证据卡/准备度一致不持久化，刷新后随进度重新点亮）
+  const activatePanel = (panelId: PanelId) => {
+    setVisiblePanels((current) => (current.includes(panelId) ? current : [...current, panelId]));
+    setExpandedPanels((current) => ({ ...current, [panelId]: true }));
+  };
+
+  // 停止演示播放：清理计时器（resetPlaying=false 时保留播放状态，用于播放前的预清理）
+  const stopDemoConversation = (resetPlaying = true) => {
+    if (demoTimerRef.current) { clearTimeout(demoTimerRef.current); demoTimerRef.current = null; }
+    if (ackTimerRef.current) { clearTimeout(ackTimerRef.current); ackTimerRef.current = null; }
+    setIsCoachTyping(false);
+    if (resetPlaying) setDemoPlaying(false);
+  };
+
+  // 演示对话播放：按脚本节奏逐条注入消息，教练消息走真实解析管线（证据卡可交互确认）
+  const playDemoConversation = () => {
+    if (!activeTestPersona) return;
+    const conversation = getMockConversation(activeTestPersona.id);
+    if (!conversation) return;
+    stopDemoConversation();
+    setMessages([]);
+    setDemoPlaying(true);
+    const turns = conversation.turns;
+    // 演示播放期间本地维护已播消息，供微行动确认检测使用（闭包里的 messages 会过期）
+    const played: PathMessage[] = [];
+    let index = 0;
+    const step = () => {
+      if (index >= turns.length) {
+        setDemoPlaying(false);
+        // 播放完成：把对话里确认的交付形态同步到积木面板
+        if (conversation.confirmedLego?.deliveryFormat) {
+          setConfirmedDeliveryFormat(conversation.confirmedLego.deliveryFormat);
+        }
+        return;
+      }
+      const turn = turns[index];
+      if (turn.role === 'assistant') {
+        setIsCoachTyping(true);
+        demoTimerRef.current = setTimeout(() => {
+          // 教练消息走真实解析管线：证据卡 → 需求对照 → 准备度
+          const evidenceParsed = parseEvidenceCardsFromReply(turn.content);
+          const requirementParsed = parseRequirementCardsFromReply(evidenceParsed.cleanText);
+          const readinessParsed = parseReadinessFromReply(requirementParsed.cleanText);
+          const parts = splitAssistantReply(readinessParsed.cleanText || turn.content);
+          if (evidenceParsed.cards.length && parts.length) {
+            const lastIndex = parts.length - 1;
+            parts[lastIndex] = { ...parts[lastIndex], evidenceCards: evidenceParsed.cards };
+            setEvidenceCards((prev) => {
+              const known = new Set(prev.map((card) => card.capability));
+              return [...prev, ...evidenceParsed.cards.filter((card) => !known.has(card.capability))];
+            });
+          }
+          if (requirementParsed.checks.length) {
+            // 演示脚本：首个需求对照出现时，若主线未设定则按脚本快照同步，并把 Step 1 标记完成
+            setSelectedBrief((prev) => {
+              const base: SelectedPathBrief = prev || {
+                pathId: conversation.confirmedMainline?.pathId || 'demo_mainline',
+                pathTitle: conversation.confirmedMainline?.pathTitle || '当前聚焦路径',
+                requirementChecks: [],
+                valueNotes: [],
+              };
+              return { ...base, requirementChecks: mergeRequirementChecks(base.requirementChecks, requirementParsed.checks) };
+            });
+            setCompletedSteps((prevSteps) => (prevSteps.includes(1) ? prevSteps : ([...prevSteps, 1] as PathStep[])));
+            setCurrentStep((current) => (current === 1 ? 2 : current));
+          }
+          if (readinessParsed.readiness) {
+            setReadiness(readinessParsed.readiness);
+            setSelectedBrief((prev) => (prev && !prev.willingness ? { ...prev, willingness: 'want' } : prev));
+            activatePanel('overview');
+            setCompletedSteps((prevSteps) => {
+              const next = prevSteps.includes(1) ? prevSteps : ([...prevSteps, 1] as PathStep[]);
+              return next.includes(2) ? next : ([...next, 2] as PathStep[]);
+            });
+            setCurrentStep(3);
+          }
+          setMessages((prev) => [...prev, ...parts]);
+          played.push({ role: 'assistant', content: readinessParsed.cleanText || turn.content });
+          setIsCoachTyping(false);
+          index += 1;
+          demoTimerRef.current = setTimeout(step, 850);
+        }, 1050);
+      } else {
+        demoTimerRef.current = setTimeout(() => {
+          // 演示脚本中的微行动确认同样写入任务列表，并点亮任务面板
+          const nextTasks = maybeAddConfirmedMicroAction(tasks, played, turn.content);
+          if (nextTasks !== tasks) {
+            setTasks(nextTasks);
+            savePathTasks(nextTasks);
+            activatePanel('tasks');
+          }
+          setMessages((prev) => [...prev, { role: 'user', content: turn.content }]);
+          played.push({ role: 'user', content: turn.content });
+          index += 1;
+          step();
+        }, 650);
+      }
+    };
+    step();
+  };
+
+  // 证据卡三出口确认 + 教练即时回应（本地模板，不调 LLM；演示播放中脚本已含确认对话，不插话）
+  const confirmEvidenceCardAction = (cardId: string, status: EvidenceCard['status'], userAmendment?: string) => {
+    updateEvidenceCardStatus(cardId, status, userAmendment);
+    if (demoPlaying) return;
+    const ack = status === 'confirmed'
+      ? '好的，这条已记为"已证实"，写进你的路径证据里了。接下来可以核对下一项，也可以先聊聊别的。'
+      : status === 'partial'
+        ? '已经按你的补充记录，这条先按"部分证实"放好——真实发生过的部分不作废。我们继续。'
+        : '好，这条先不记。你的经历里还有别的线索，随时告诉我，我们从新的经历里找。';
+    if (ackTimerRef.current) clearTimeout(ackTimerRef.current);
+    setIsCoachTyping(true);
+    ackTimerRef.current = setTimeout(() => {
+      setMessages((prev) => [...prev, { role: 'assistant', content: ack }]);
+      setIsCoachTyping(false);
+    }, 700);
+  };
+
+  // 设为主线（Step 2 入口）：从路径详情按钮进入；完成度门槛未满足时给引导而非硬拦
+  const selectMainlinePath = (path: LegoPath) => {
+    if (path.id === selectedBrief?.pathId) return;
+    if (!step2Unlocked) {
+      if (ackTimerRef.current) clearTimeout(ackTimerRef.current);
+      setIsCoachTyping(true);
+      ackTimerRef.current = setTimeout(() => {
+        setMessages((prev) => [...prev, {
+          role: 'assistant',
+          content: '先别急，我们把 Step 1 的完成度攒够再来聚焦这条路径：确认你的交付形态（积木②）、聊清利基主题（积木③），并且至少证实 2 张能力证据卡。现在继续和我聊就对了，门槛到了我会提醒你回来选主线。',
+        }]);
+        setIsCoachTyping(false);
+      }, 700);
+      return;
+    }
+    setSelectedBrief({
+      pathId: path.id,
+      pathTitle: displayPathTitle(path.title),
+      requirementChecks: [],
+      valueNotes: [],
+    });
+    setCompletedSteps((prev) => (prev.includes(1) ? prev : ([...prev, 1] as PathStep[])));
+    setCurrentStep(2);
+    if (ackTimerRef.current) clearTimeout(ackTimerRef.current);
+    setIsCoachTyping(true);
+    ackTimerRef.current = setTimeout(() => {
+      setMessages((prev) => [...prev, {
+        role: 'assistant',
+        content: `好，我把「${displayPathTitle(path.title)}」同步为你的主线，Step 2 从现在开始。接下来我们做信息聚焦：我会把这条路径最看重的几个岗位需求拎出来，逐个对照你已有的证据——已经证实过的能力直接对上，不用重新讲一遍经历；对不上的地方我们再看要不要补。我们从第一个需求开始。`,
+      }]);
+      setIsCoachTyping(false);
+    }, 700);
+  };
+
   const handleSend = async () => {
     const text = draft.trim();
     if (!text || isCoachTyping) return;
+    // 意愿三态捕捉：Step 2 对照期间用户对"还想做吗"的回答（轻量正则；教练对话仍是权威，误判无害）
+    if (selectedBrief && selectedBrief.requirementChecks.length > 0 && !selectedBrief.willingness) {
+      if (/不想做|不适合我|还是算了|先不弄了/.test(text)) {
+        setSelectedBrief((prev) => (prev ? { ...prev, willingness: 'no' } : prev));
+      } else if (/想做|还想做|挺想做|愿意|可以试试|想试试|有兴趣/.test(text)) {
+        setSelectedBrief((prev) => (prev ? { ...prev, willingness: 'want' } : prev));
+      } else if (/观望|不确定|还没想好|再看看/.test(text)) {
+        setSelectedBrief((prev) => (prev ? { ...prev, willingness: 'unsure' } : prev));
+      }
+    }
     const nextTasks = maybeAddConfirmedMicroAction(tasks, messages, text);
     if (nextTasks !== tasks) {
       setTasks(nextTasks);
       savePathTasks(nextTasks);
-      setExpandedPanels((current) => ({ ...current, tasks: true }));
+      activatePanel('tasks');
     }
     const inferredResourceNotes = inferResourceNotesFromUserText(text, currentExplorationRole);
     if (inferredResourceNotes.length) {
@@ -2160,10 +2741,54 @@ export default function PathPage() {
       const res = await fetch('/api/coach/path/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
-        body: JSON.stringify({ messages: nextMessages, report, preview, tasks: nextTasks }),
+        body: JSON.stringify({
+          messages: nextMessages,
+          report,
+          preview,
+          tasks: nextTasks,
+          lego: currentLegoProfile(),
+          evidenceCards,
+          realityConstraints,
+          step: currentStep,
+          selectedBrief,
+          readiness,
+          pathOptions: (activeTestPersona?.legoPaths ?? []).map((path) => ({
+            title: path.title,
+            deliveryFormat: path.deliveryFormat,
+            marketDensity: path.marketDensity,
+            feasibility: path.feasibility,
+          })),
+        }),
       });
       const data = (await res.json()) as { reply?: string };
-      const assistantMessages = splitAssistantReply(data.reply || '现实路径教练暂时没有返回内容，请稍后再试。');
+      // 解析教练回复标记：证据卡 → 需求对照 → 准备度，逐层剥离后正文再分段渲染
+      const evidenceParsed = parseEvidenceCardsFromReply(data.reply || '');
+      const requirementParsed = parseRequirementCardsFromReply(evidenceParsed.cleanText);
+      const readinessParsed = parseReadinessFromReply(requirementParsed.cleanText);
+      const assistantMessages = splitAssistantReply(readinessParsed.cleanText || '现实路径教练暂时没有返回内容，请稍后再试。');
+      if (evidenceParsed.cards.length && assistantMessages.length) {
+        const lastAssistantIndex = assistantMessages.length - 1;
+        assistantMessages[lastAssistantIndex] = {
+          ...assistantMessages[lastAssistantIndex],
+          evidenceCards: evidenceParsed.cards,
+        };
+        setEvidenceCards((prev) => {
+          const knownCapabilities = new Set(prev.map((card) => card.capability));
+          return [...prev, ...evidenceParsed.cards.filter((card) => !knownCapabilities.has(card.capability))];
+        });
+      }
+      if (requirementParsed.checks.length) {
+        // 需求对照只在已选定主线时落位；主线未选（真实用户未点按钮）时暂存到教练正文，不强建主线
+        setSelectedBrief((prev) => {
+          if (!prev) return prev;
+          return { ...prev, requirementChecks: mergeRequirementChecks(prev.requirementChecks, requirementParsed.checks) };
+        });
+      }
+      if (readinessParsed.readiness) {
+        setReadiness(readinessParsed.readiness);
+        setSelectedBrief((prev) => (prev && !prev.willingness ? { ...prev, willingness: 'want' } : prev));
+        activatePanel('overview');
+      }
       setMessages((prev) => [...prev, ...assistantMessages]);
       void trackEvent({ eventName: 'path_chat_reply_received', page: '/path', status: 'success', metadata: { roleName: currentExplorationRole || null } });
       const checksForRole = explorationChecksByRole[currentExplorationRole] || [];
@@ -2174,6 +2799,12 @@ export default function PathPage() {
           resources: pickTopItems([...nextSummary.resources, ...current.resources], 8),
           resourceNotes: mergeResourceNotes(nextSummary.resourceNotes || [], current.resourceNotes || []),
         } : nextSummary);
+      }
+      // 教练回复后自动持久化档案快照（不触碰待确认的资料板建议）
+      const autoArchiveBoard = pendingBoardSummary || boardSummary;
+      if (autoArchiveBoard) {
+        persistArchiveSummary(report, autoArchiveBoard, nextMessages, nextTasks, findTodayReflection());
+        setArchiveUpdatedAt(autoArchiveBoard.updatedAt || new Date().toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }));
       }
     } catch {
       void trackEvent({ eventName: 'path_chat_reply_received', page: '/path', status: 'error' });
@@ -2219,41 +2850,6 @@ export default function PathPage() {
     setPendingBoardSummary(null);
   };
 
-  const updateArchive = async () => {
-    if (locked) {
-      setLockedNoticeOpen(true);
-      return;
-    }
-
-    const nextBoard = pendingBoardSummary || buildBoardSummaryFromConversation(report, preview, messages);
-    setBoardSummary(nextBoard);
-    setPendingBoardSummary(null);
-    const todayReflection = findTodayReflection();
-    persistArchiveSummary(report, nextBoard, messages, tasks, todayReflection);
-    setArchiveUpdatedAt(nextBoard.updatedAt || new Date().toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }));
-
-    const { data } = await supabase.auth.getSession();
-    const accessToken = data.session?.access_token;
-    if (!accessToken) {
-      setShowAuth(true);
-      return;
-    }
-
-    await fetch('/api/auth/finalize', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify({
-        termsAccepted: true,
-        trainingConsent: true,
-        policyVersion: 'v2026-05',
-        draftToken,
-      }),
-    }).catch(() => null);
-  };
-
   const toggleTaskCompletion = (taskId: string) => {
     const nextTasks = tasks.map((task) => {
       if (task.id !== taskId) return task;
@@ -2284,7 +2880,7 @@ export default function PathPage() {
       ...current.filter((item) => item.dateKey !== nextReflection.dateKey),
     ]);
     setSelectedCalendarDate(nextReflection.dateKey);
-    setExpandedPanels((current) => ({ ...current, calendar: true }));
+    activatePanel('reflection');
     setReflectionSavedAt(now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
     setReflectionText('');
   };
@@ -2305,19 +2901,140 @@ export default function PathPage() {
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Reality Path</div>
             <div className="truncate text-base font-bold text-[#2A6FA3]">现实路径地图</div>
           </div>
-          <Button onClick={() => void updateArchive()} variant="outline" className="rounded-full border-[#86B8FF]/35 bg-white/85 text-[#2A6FA3] shadow-sm hover:bg-[#F3F8FF]">
-            档案更新
-          </Button>
+          {showTestEntry ? (
+            <Button
+              onClick={() => setTestModeEnabled((v) => !v)}
+              variant={testModeEnabled ? 'default' : 'outline'}
+              className={testModeEnabled
+                ? 'rounded-full bg-amber-500 text-white shadow-sm hover:bg-amber-600'
+                : 'rounded-full border-amber-300/50 bg-amber-50/50 text-amber-700 shadow-sm hover:bg-amber-100/70'}
+            >
+              {testModeEnabled ? '退出测试模式' : '测试模式'}
+            </Button>
+          ) : null}
         </div>
+
+        <div className="mt-6 rounded-[1.4rem] border border-[#86B8FF]/22 bg-white/78 px-5 py-4 shadow-[0_18px_50px_rgba(15,23,42,0.06)] backdrop-blur">
+          <PathStepIndicator
+            currentStep={currentStep}
+            completedSteps={completedSteps}
+            displayedStep={displayedStep}
+            onSelect={(step) => {
+              // 已完成或当前 step 都可以看；未解锁的 step 不能跳
+              if (step === currentStep || completedSteps.includes(step)) {
+                setViewingStep(step === currentStep ? null : step);
+              }
+            }}
+          />
+        </div>
+
+        {testModeEnabled ? (
+          <div className="mt-4 rounded-[1.4rem] border border-amber-200/60 bg-amber-50/60 px-5 py-4 shadow-[0_12px_30px_rgba(251,191,36,0.08)] backdrop-blur">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">测试画像</span>
+                <div className="flex items-center gap-2">
+                  {PATH_TEST_PERSONAS.map((persona) => {
+                    const isActive = activeTestPersona?.id === persona.id;
+                    return (
+                      <button
+                        key={persona.id}
+                        type="button"
+                        onClick={() => loadTestPersona(persona)}
+                        className={`group flex flex-col items-center gap-1 rounded-2xl px-3 py-2 transition ${
+                          isActive
+                            ? 'bg-amber-500 text-white shadow-md'
+                            : 'bg-white/70 text-slate-700 hover:bg-white hover:shadow-sm'
+                        }`}
+                        aria-pressed={isActive}
+                      >
+                        <span
+                          className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold ${
+                            isActive ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-700'
+                          }`}
+                          aria-hidden
+                        >
+                          {persona.name.charAt(0)}
+                        </span>
+                        <span className="text-xs font-medium">{persona.name}</span>
+                        <span className={`text-[10px] ${isActive ? 'text-amber-50' : 'text-slate-500'}`}>
+                          {persona.domain === 'business' ? '商科' : persona.domain === 'engineering' ? '理工科' : '艺术'}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              {activeTestPersona ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={exitTestMode}
+                  className="rounded-full border-amber-300/50 bg-white/85 text-amber-700 hover:bg-amber-100/70"
+                >
+                  清除画像
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        {testModeEnabled && activeTestPersona ? (
+          <Card className="mt-4 rounded-[1.4rem] border border-amber-200/60 bg-white/85 shadow-[0_12px_30px_rgba(251,191,36,0.08)]">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base font-semibold text-amber-800">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-100 text-xs font-bold text-amber-700">
+                  {activeTestPersona.name.charAt(0)}
+                </span>
+                {activeTestPersona.name} · {activeTestPersona.currentRole} · {activeTestPersona.yearsOfExperience} 年
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm text-slate-700">
+              <p className="leading-6 text-slate-600">{activeTestPersona.background}</p>
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-xl border border-slate-200/70 bg-slate-50/60 px-3 py-2">
+                  <div className="text-[11px] font-medium text-slate-500">核心价值观</div>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {activeTestPersona.coreValues.map((v) => (
+                      <Badge key={v} variant="outline" className="border-amber-300/60 bg-amber-50/80 text-amber-800 text-xs">
+                        {CORE_VALUE_LABELS[v]}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-slate-200/70 bg-slate-50/60 px-3 py-2">
+                  <div className="text-[11px] font-medium text-slate-500">稳定性 / 收入 / 节奏</div>
+                  <div className="mt-1 text-xs leading-5 text-slate-700">
+                    {activeTestPersona.stabilityPreference === 'high' ? '高稳定' : activeTestPersona.stabilityPreference === 'medium' ? '中等稳定' : '低稳定容忍'}
+                    {' · '}
+                    {activeTestPersona.incomeExpectation === 'high' ? '高收入' : activeTestPersona.incomeExpectation === 'medium' ? '中等收入' : '低收入容忍'}
+                    {' · '}
+                    {activeTestPersona.pacePreference === 'structured' ? '结构化' : activeTestPersona.pacePreference === 'flexible' ? '灵活' : '爆发式'}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-slate-200/70 bg-slate-50/60 px-3 py-2">
+                  <div className="text-[11px] font-medium text-slate-500">理想职业</div>
+                  <div className="mt-1 text-xs leading-5 text-slate-700">{activeTestPersona.idealRoles.join(' · ')}</div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
 
         <div className="mt-6 grid gap-6 min-[768px]:grid-cols-[minmax(0,1fr)_340px] xl:grid-cols-[minmax(0,1fr)_400px]">
           <div className="order-2 min-w-0 space-y-6 min-[768px]:order-1">
-            <div className="hidden rounded-[1.6rem] border border-[#86B8FF]/16 bg-white/72 p-6 shadow-[0_18px_50px_rgba(15,23,42,0.06)] backdrop-blur md:block">
-              <h1 className="text-3xl font-bold tracking-tight text-[#2A6FA3]">把报告里的方向变成可推进的职业路径</h1>
-              <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
-                先跟现实路径教练聊聊你的想法，然后在面板里进行下一步整理、分析和记录。
-              </p>
-            </div>
+            {displayedStep !== currentStep ? (
+              <div className="rounded-2xl border border-sky-200 bg-sky-50/80 px-4 py-3 text-sm text-sky-900">
+                正在查看 Step {displayedStep} 的历史记录。<button type="button" className="ml-2 font-semibold underline" onClick={() => setViewingStep(null)}>返回 Step {currentStep}</button>
+              </div>
+            ) : null}
+            <PathStepContent step={displayedStep}>
+              <div className="hidden rounded-[1.6rem] border border-[#86B8FF]/16 bg-white/72 p-6 shadow-[0_18px_50px_rgba(15,23,42,0.06)] backdrop-blur md:block">
+                <h1 className="text-3xl font-bold tracking-tight text-[#2A6FA3]">把报告里的方向变成可推进的职业路径</h1>
+                <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
+                  先跟现实路径教练聊聊你的想法，然后在面板里进行下一步整理、分析和记录。
+                </p>
+              </div>
 
             {locked ? (
               <Card className="rounded-[1.6rem] border border-amber-200/80 bg-amber-50/70 shadow-[0_18px_50px_rgba(15,23,42,0.04)]">
@@ -2338,82 +3055,66 @@ export default function PathPage() {
               </Card>
             ) : null}
 
-            {!locked && preview?.work_profile ? (
-              <WorkProfileBoard
-                profile={preview.work_profile}
-                hasConversation={messages.some((message) => message.role === 'user' && message.content.trim().length > 0)}
+            {!locked && report ? (
+              <PathLegoPanel
+                profile={currentLegoProfile()}
+                paths={activeTestPersona?.legoPaths ?? []}
+                shareName={activeTestPersona?.name}
+                shareArchetype={report?.archetype}
+                mainlinePathId={selectedBrief?.pathId ?? null}
+                onSelectAsMainline={selectMainlinePath}
+                valueProfile={
+                  activeTestPersona
+                    ? {
+                        coreValues: activeTestPersona.coreValues,
+                        stabilityPreference: activeTestPersona.stabilityPreference,
+                        incomeExpectation: activeTestPersona.incomeExpectation,
+                        pacePreference: activeTestPersona.pacePreference,
+                      }
+                    : null
+                }
               />
             ) : null}
 
-            {!locked ? <CapabilityEvidenceProgressDemo confirmed={demoEvidenceConfirmed} mode={demoEvidenceMode} /> : null}
+            {!locked ? <EvidenceProgressPanel cards={evidenceCards} constraints={realityConstraints} /> : null}
 
-            {visiblePanels.includes('overview') ? <MobilePanel
-              id="overview"
-              title="当前探索焦点"
-              description="这一轮正在核对什么，以及它如何推进下一步。"
-              expanded={expandedPanels.overview}
+            {!locked && selectedBrief ? <RequirementFocusPanel brief={selectedBrief} /> : null}
+
+            {!locked && readiness ? <ReadinessPanel readiness={readiness} /> : null}
+
+            {visiblePanels.includes('overview') || visiblePanels.includes('tasks') ? (
+              <ActionCenterCard
+                locked={locked}
+                mainlineTitle={selectedBrief?.pathTitle || boardSummary?.leastResistancePath || null}
+                ownedAbility={(() => {
+                  const haveLine = readiness?.have[0];
+                  if (haveLine) return haveLine.split(/[：:]/)[0].trim();
+                  const confirmed = [...evidenceCards].reverse().find((card) => card.status === 'confirmed');
+                  return confirmed?.capability || null;
+                })()}
+                readinessScore={readiness?.score ?? null}
+                tasks={tasks}
+                onToggleTask={toggleTaskCompletion}
+              />
+            ) : null}
+
+            {visiblePanels.includes('reflection') ? <MobilePanel
+              id="reflection"
+              title="今日觉察"
+              description="记录对话、行动和心情贴纸。"
+              expanded={expandedPanels.reflection}
               onToggle={togglePanel}
             >
-              <Card className="rounded-[1.6rem] border border-[#86B8FF]/26 bg-[linear-gradient(180deg,rgba(243,248,255,0.96)_0%,rgba(255,255,255,0.86)_100%)] text-[#2A6FA3] shadow-[0_18px_50px_rgba(134,184,255,0.18)] backdrop-blur">
-                <CardContent className="p-6">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-[#2A6FA3]">
-                    <Compass className="h-4 w-4" />
-                    当前探索焦点
-                  </div>
-                  <h2 className="mt-3 text-2xl font-bold tracking-tight text-[#2A6FA3]">
-                    {locked ? '完成天赋报告后生成' : boardSummary?.leastResistancePath || '正在整理'}
-                  </h2>
-                  <p className="mt-3 text-sm leading-7 text-[#4A789C]">
-                    {locked
-                      ? '这里会综合你的资源、工具、路径和可进入场域，判断哪条职业路径最适合先推进。'
-                      : '先看清这个方向里的工作，哪些与你做过的事情相连。'}
-                  </p>
-                  {!locked ? (
-                    <div className="mt-5 rounded-2xl border border-[#86B8FF]/20 bg-white/72 px-4 py-3">
-                      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#7A97B5]">正在核对</div>
-                      <div className="mt-2 text-sm leading-7 text-[#2A6FA3]">
-                        用户反馈整理与问题归因，对应需求分析能力
-                      </div>
-                      <div className="mt-2 text-xs text-[#7A97B5]">
-                        {demoEvidenceConfirmed ? '已确认，继续下一项。' : '等待确认或补充。'}
-                      </div>
-                    </div>
-                  ) : null}
-                </CardContent>
-              </Card>
+              <TodayReflectionCard
+                value={reflectionText}
+                mood={reflectionMood}
+                savedAt={reflectionSavedAt}
+                locked={locked}
+                onChange={setReflectionText}
+                onMoodChange={setReflectionMood}
+                onSave={saveTodayReflection}
+              />
             </MobilePanel> : null}
-
-            {visiblePanels.includes('tasks') || visiblePanels.includes('reflection') ? (
-            <div className={`grid gap-4 ${visiblePanels.includes('tasks') && visiblePanels.includes('reflection') ? 'min-[1080px]:grid-cols-2' : ''}`}>
-              {visiblePanels.includes('tasks') ? <MobilePanel
-                id="tasks"
-                title="任务列表"
-                description="教练确认后的微行动会同步到这里。"
-                expanded={expandedPanels.tasks}
-                onToggle={togglePanel}
-              >
-                <TaskListCard tasks={tasks} locked={locked} onToggleTask={toggleTaskCompletion} />
-              </MobilePanel> : null}
-
-              {visiblePanels.includes('reflection') ? <MobilePanel
-                id="reflection"
-                title="今日觉察"
-                description="记录对话、行动和心情贴纸。"
-                expanded={expandedPanels.reflection}
-                onToggle={togglePanel}
-              >
-                <TodayReflectionCard
-                  value={reflectionText}
-                  mood={reflectionMood}
-                  savedAt={reflectionSavedAt}
-                  locked={locked}
-                  onChange={setReflectionText}
-                  onMoodChange={setReflectionMood}
-                  onSave={saveTodayReflection}
-                />
-              </MobilePanel> : null}
-            </div>
-            ) : null}
 
             {visiblePanels.includes('calendar') ? <MobilePanel
               id="calendar"
@@ -2582,6 +3283,7 @@ export default function PathPage() {
                 <p className="mt-2 text-sm leading-6 text-slate-500">打开左上角菜单，添加你现在需要的模块。</p>
               </div>
             ) : null}
+            </PathStepContent>
           </div>
 
           <aside id="coach" className="order-1 min-w-0 space-y-4 min-[768px]:order-2">
@@ -2594,6 +3296,17 @@ export default function PathPage() {
                   </div>
                   <p className="mt-1 text-xs leading-6 text-slate-500">帮助你更好地把理想向现实推进。</p>
                 </div>
+                {showTestEntry && activeTestPersona ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={isCoachTyping && !demoPlaying}
+                    className="shrink-0 rounded-full border-amber-300/70 bg-amber-50/70 text-xs font-semibold text-amber-800 hover:bg-amber-100/80"
+                    onClick={() => (demoPlaying ? stopDemoConversation() : playDemoConversation())}
+                  >
+                    {demoPlaying ? '■ 停止演示' : '▶ 播放演示对话'}
+                  </Button>
+                ) : null}
               </div>
 
               <div ref={messagesScrollRef} className="scroll-pb-8 overflow-y-auto px-5 py-4 min-[768px]:min-h-0 min-[768px]:flex-1">
@@ -2629,35 +3342,22 @@ export default function PathPage() {
                     <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                       <div className={`max-w-[90%] rounded-2xl border px-4 py-3 text-sm leading-7 shadow-sm ${msg.role === 'user' ? 'border-[#D9D0EE]/55 bg-[#F7F3FF] text-slate-700' : 'border-[#B9D8F2]/60 bg-[#F2F8FF] text-slate-700'}`}>
                         <CoachMessageContent content={msg.content} />
+                        {msg.role === 'assistant' && msg.evidenceCards?.length ? (
+                          <div className="mt-2 space-y-2">
+                            {msg.evidenceCards.map((card) => (
+                              <EvidenceConfirmCard
+                                key={card.id}
+                                card={card}
+                                onConfirm={() => confirmEvidenceCardAction(card.id, 'confirmed')}
+                                onSupplement={(amendment) => confirmEvidenceCardAction(card.id, 'partial', amendment)}
+                                onReject={() => confirmEvidenceCardAction(card.id, 'rejected')}
+                              />
+                            ))}
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                   ))}
-                  {!locked ? (
-                    <CapabilityEvidenceCoachDemo
-                      confirmed={demoEvidenceConfirmed}
-                      mode={demoEvidenceMode}
-                      draft={demoEvidenceDraft}
-                      onDraftChange={setDemoEvidenceDraft}
-                      onConfirm={() => {
-                        setDemoEvidenceConfirmed(true);
-                        setDemoEvidenceMode('idle');
-                        setDemoEvidenceDraft('');
-                      }}
-                      onChooseSupplement={() => {
-                        setDemoEvidenceMode('supplement');
-                        setDemoEvidenceDraft('');
-                      }}
-                      onSubmitFeedback={() => {
-                        if (!demoEvidenceDraft.trim()) return;
-                        setDemoEvidenceMode('submittedSupplement');
-                      }}
-                      onReset={() => {
-                        setDemoEvidenceConfirmed(false);
-                        setDemoEvidenceMode('idle');
-                        setDemoEvidenceDraft('');
-                      }}
-                    />
-                  ) : null}
                   {isCoachTyping ? <CoachTypingBubble /> : null}
                 </div>
               </div>

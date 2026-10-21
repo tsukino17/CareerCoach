@@ -6,7 +6,8 @@ const TOKENDANCE_BASE_URL = 'https://tokendance.space/gateway/v1';
 const DASHSCOPE_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
 
 export const TOKENDANCE_DEFAULT_CHAT_MODEL = 'qwen3.7-plus';
-const DASHSCOPE_DEFAULT_CHAT_MODEL = 'qwen-plus';
+// 2026-10：官方下线 qwen-plus/qwen3.6 系列（见百炼模型下线机制说明），兜底模型同步升级到当前推荐代际
+const DASHSCOPE_DEFAULT_CHAT_MODEL = 'qwen3.7-plus';
 
 export type LlmGateway = {
   provider: 'tokendance' | 'dashscope';
