@@ -1,6 +1,7 @@
 'use client';
 
 import { supabase } from '@/lib/supabase';
+import { INTERNAL_DEVICE_STORAGE_KEY } from '@/lib/analytics-internal';
 
 export type TrackEventPayload = {
   eventName: string;
@@ -51,6 +52,8 @@ export async function trackEvent(payload: TrackEventPayload) {
     const { sessionId, visitorId } = getAnalyticsContext();
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;
+    const internalDevice = typeof window !== 'undefined'
+      && window.localStorage.getItem(INTERNAL_DEVICE_STORAGE_KEY) === '1';
     await fetch('/api/analytics/event', {
       method: 'POST',
       headers: {
@@ -65,6 +68,7 @@ export async function trackEvent(payload: TrackEventPayload) {
           anonymousVisitorId: visitorId,
           // 站点标记：后台/周报默认只统计 echotalent.fun，本地事件不会混入线上口径
           host: typeof window !== 'undefined' ? window.location.host : '',
+          ...(internalDevice ? { internalDevice: true } : {}),
         },
       }),
       keepalive: true,

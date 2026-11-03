@@ -1,6 +1,14 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
+import { decodeCityName } from '@/lib/analytics-normalize';
+import { isAdminEmail } from '@/lib/admin-auth';
+import {
+  buildServerInternalMetadata,
+  hasInternalDeviceCookie,
+  isInternalVisitorId,
+  type InternalAnalyticsReason,
+} from '@/lib/analytics-internal';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,7 +32,8 @@ function getGeoMetadata(req: Request) {
   return {
     country: req.headers.get('x-vercel-ip-country') || req.headers.get('cf-ipcountry') || '',
     region: req.headers.get('x-vercel-ip-country-region') || req.headers.get('x-region') || '',
-    city: req.headers.get('x-vercel-ip-city') || req.headers.get('x-city') || '',
+    // Vercel 的 x-vercel-ip-city 是 URL 编码的（如 Los%20Angeles），写入前先解码
+    city: decodeCityName(req.headers.get('x-vercel-ip-city') || req.headers.get('x-city') || ''),
   };
 }
 
@@ -43,14 +52,21 @@ export async function POST(req: Request) {
     });
 
     let userId: string | null = null;
+    let userEmail: string | null = null;
     const authHeader = req.headers.get('authorization');
     if (authHeader?.startsWith('Bearer ')) {
       const token = authHeader.replace('Bearer ', '').trim();
       if (token) {
         const { data } = await supabaseAdmin.auth.getUser(token);
         userId = data.user?.id || null;
+        userEmail = data.user?.email || null;
       }
     }
+
+    const reasons: InternalAnalyticsReason[] = [];
+    if (userEmail && isAdminEmail(userEmail)) reasons.push('admin_email');
+    if (hasInternalDeviceCookie(req.headers.get('cookie'))) reasons.push('internal_device');
+    if (isInternalVisitorId(payload.metadata?.anonymousVisitorId)) reasons.push('visitor_allowlist');
 
     const { error } = await supabaseAdmin.from('analytics_events').insert({
       user_id: userId,
@@ -60,7 +76,7 @@ export async function POST(req: Request) {
       step: payload.step || null,
       status: payload.status || null,
       metadata: {
-        ...(payload.metadata || {}),
+        ...buildServerInternalMetadata(payload.metadata, reasons),
         ...getGeoMetadata(req),
       },
       ip: getClientIp(req) || null,

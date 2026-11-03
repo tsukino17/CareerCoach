@@ -2,7 +2,7 @@
 
 > 从一次真诚的对话开始，理解你的职业优势，并把它转化为可以验证的现实路径。
 
-当前版本：**v4.5.8**
+当前版本：**v4.5.9**
 
 官网：[echotalent.fun](https://echotalent.fun)
 
@@ -80,7 +80,17 @@ EchoTalent 是一个 AI 职业探索产品。它不只给出一份静态测评�
 
 ![现实路径地图](docs/screenshots/03-path.png)
 
-## 最新版本 · v4.5.8
+## 最新版本 · v4.5.9
+
+### 分析口径与用户中心 (Analytics Normalization & User Center)
+
+- **城市归一**: 周报与后台 insights 统一解码 Vercel 城市头并映射为中文，城市访客数按访客去重，避免同一城市重复膨胀。
+- **内部流量识别**: 管理员邮箱、内部设备 Cookie、访客白名单在服务端写入 `metadata.internal`，周报/月报/insights 默认排除，不影响原始事件写入。
+- **内部设备标记**: 新增 `/internal-flag?token=...` 一次性页面，可启用或取消当前浏览器的内部设备标记；配置说明见下方「排除内部流量」。
+- **用户中心改版**: 三层信息架构（身份 → 天赋/路径/能量 → 对话与报告）；支付未启用时能量/余额卡整卡隐藏，充值入口保持默认关闭。
+- **周报稳定性**: 长文本按完整语义裁剪、并列排名稳定排序，城市与访客口径与后台保持一致。
+
+## 历史版本 · v4.5.8
 
 ### 现实路径教练·三步闭环 (Reality Path Coach · Three Steps)
 
@@ -136,13 +146,31 @@ EchoTalent 是一个 AI 职业探索产品。它不只给出一份静态测评�
 ### 运营数据与周报
 
 - `/admin` 已支持查看 PV、UV、页面停留、访问来源、漏斗、消息量和关键事件。
-- `GET /api/admin/weekly-report` 返回最近 7 天的聚合周报；管理员访问需要现有管理员鉴权。
+- `GET /api/admin/weekly-report` 返回上一自然周（周一至周日，Asia/Shanghai）的聚合周报，并附上周环比；管理员访问需要现有管理员鉴权。
 - Vercel Cron 每周一 09:00（北京时间）触发周报、每月 1 日 09:00（北京时间）触发上月月报发送。需要配置 `CRON_SECRET`、`RESEND_API_KEY`、`ANALYTICS_REPORT_FROM_EMAIL` 和 `ANALYTICS_REPORT_TO_EMAIL`。
 - 周报只发送聚合指标，不发送用户原始对话、邮箱地址或 IP。
 - 周报/月报会按 User-Agent 聚合访问城市、设备类别、可公开的设备型号和操作系统；iPhone/iPad 及多数电脑不会公开具体硬件型号，会标记为“具体型号未公开”。
 - 匿名访客通过本地访客 ID 识别回访；一次匿名会话在连续 6 小时无活动后才切分，适配低频职业探索场景。
 - `/admin` 及其数据接口仅允许 `localhost`、`127.0.0.1` 或 `::1` 访问；本机管理员码验证后使用签名 Cookie 免重复输入。周报定时接口仅接受 `CRON_SECRET` 调用。
 - 登录弹窗支持发送密码重置邮件，邮件链接进入 `/auth/reset` 设置新密码；链接失效时需重新发送。
+
+#### 排除内部流量
+
+内部流量只影响统计口径，事件仍正常写入 `analytics_events`，不会物理删除或修改原始数据。周报、月报和 `/api/admin/insights` 默认排除带内部标记的事件。
+
+1. **管理员账号**：把管理员邮箱加入 `ADMIN_EMAILS`（逗号分隔）。管理员登录后产生的事件会在服务端写入 `metadata.internal=true` 和 `metadata.internalReason=admin_email`，自动从统计中排除。
+2. **内部设备（未登录也能识别）**：
+   - 配置环境变量 `ANALYTICS_INTERNAL_TOKEN`（随机长字符串，不要提交到仓库）。
+   - 在需要标记的设备上打开一次性链接：`https://echotalent.fun/internal-flag?token=<ANALYTICS_INTERNAL_TOKEN>`。
+   - 页面校验通过后会写入 httpOnly Cookie `analytics_internal_device=1` 和 localStorage 标记；之后该设备未登录产生的事件会带 `metadata.internal=true`（原因 `internal_device`）。
+   - 取消：在同一页面点击「取消内部设备标记」，或在已标记设备打开 `/internal-flag` 后取消；页面会清除 Cookie 和 localStorage。
+   - 令牌缺失或错误时不会设置任何标记，页面也不会回显令牌。
+3. **访客 ID 兜底**：配置 `ANALYTICS_INTERNAL_VISITOR_IDS`（逗号分隔的 `anonymousVisitorId`）。命中列表的访客事件在服务端标记 `internalReason=visitor_allowlist`，即使未登录、未设置设备 Cookie 也会被排除。
+4. **验证生效**：
+   - 打开后台 `/admin` 或触发周报，确认 UV、城市表中不再出现内部访问；
+   - 在 `analytics_events` 中查看对应事件，应能看到 `metadata.internal=true` 与 `internalReason`；
+   - 周报「异常与数据质量」区会显示本周排除的内部事件条数。
+5. **AI 成本口径**：可选配置 `ANALYTICS_AI_COST_PER_1K_TOKENS_CNY`（每千 tokens 的人民币单价）。未配置时周报只展示调用量与 token，不估算金额。
 
 ## 技术栈
 

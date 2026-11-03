@@ -200,6 +200,7 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
   const [reportError, setReportError] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
+  const [quotaGate, setQuotaGate] = useState<{ kind: 'signup' | 'recharge'; message: string; balance?: number } | null>(null);
   const [pendingAction, setPendingAction] = useState<'new_chat' | 'report' | null>(null);
   const [reportNudgeOpen, setReportNudgeOpen] = useState(false);
   const [reportNudgeNonce, setReportNudgeNonce] = useState(0);
@@ -357,7 +358,21 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
     api: '/api/chat',
     initialMessages: initialChatMessages,
     headers: chatHeaders,
-    onResponse: async () => {
+    onResponse: async (response) => {
+      if (!response.ok) {
+        const payload = (await response.clone().json().catch(() => null)) as
+          | { error?: string; needSignup?: boolean; needRecharge?: boolean; balance?: number }
+          | null;
+        if (response.status === 402) {
+          setQuotaGate({
+            kind: payload?.needSignup ? 'signup' : 'recharge',
+            message: payload?.error || '能量不足，暂时无法继续对话。',
+            balance: payload?.balance,
+          });
+        }
+        return;
+      }
+      setQuotaGate(null);
       try {
         const user = await safeGetUser();
         if (!user) return;
@@ -546,6 +561,7 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
   const submitCurrentInput = useCallback(async () => {
     if (isLoading) return;
     setReportError(null);
+    setQuotaGate(null);
     const liveValue = textareaRef.current?.value ?? '';
     const nextValue = (liveValue || draftInput).trim();
     if (!nextValue) return;
@@ -993,7 +1009,7 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
             <div className="flex items-center gap-3">
               <div className="flex flex-col">
                 <h1 className="text-lg font-medium tracking-tight text-foreground/80">EchoTalent</h1>
-                <span className="text-[10px] text-muted-foreground tracking-widest uppercase opacity-70">v4.5.8</span>
+                <span className="text-[10px] text-muted-foreground tracking-widest uppercase opacity-70">v4.5.9</span>
               </div>
             </div>
             <div className="flex items-center gap-1.5 sm:gap-2">
@@ -1036,7 +1052,7 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
               </button>
 
               <Link
-                href="/user"
+                href="/user-center"
                 className="group inline-flex items-center justify-center rounded-full w-8 h-8 sm:w-9 sm:h-9 bg-white/35 hover:bg-primary/15 hover:shadow-md hover:shadow-primary/15 hover:scale-105 active:bg-primary/25 active:scale-95 transition-all duration-150 ml-0.5 sm:ml-1 border border-white/35 hover:border-primary/25"
                 title="用户中心"
               >
@@ -1046,9 +1062,46 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
           </header>
 
           <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 scroll-smooth pb-24 md:pb-8">
-            {error && (
+            {error && !quotaGate && (
               <div className="w-full p-4 mb-4 text-sm text-red-500 bg-red-50/80 backdrop-blur rounded-2xl border border-red-100 shadow-sm" role="alert">
                 <span className="font-medium">出错啦：</span> {error.message}
+              </div>
+            )}
+            {/* [RESERVED:payment] 402 区块仅在充值/能量拦截开启时出现 */}
+            {quotaGate && (
+              <div className="w-full rounded-2xl border border-primary/20 bg-white/80 p-4 shadow-sm backdrop-blur" role="alert">
+                <div className="text-sm font-medium text-foreground/85">{quotaGate.message}</div>
+                {typeof quotaGate.balance === 'number' && (
+                  <div className="mt-1 text-xs text-muted-foreground/70">
+                    对话按实际用量扣除能量
+                  </div>
+                )}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {quotaGate.kind === 'signup' ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setShowAuth(true)}
+                        className="rounded-full bg-primary px-4 py-2 text-xs font-semibold text-white shadow-sm transition-transform hover:scale-[1.02]"
+                      >
+                        免费注册领取 1 万能量
+                      </button>
+                      <Link
+                        href="/recharge"
+                        className="rounded-full border border-primary/20 bg-white/70 px-4 py-2 text-xs font-semibold text-foreground/80 transition-colors hover:bg-primary/10"
+                      >
+                        查看充值套餐
+                      </Link>
+                    </>
+                  ) : (
+                    <Link
+                      href="/recharge"
+                      className="rounded-full bg-primary px-4 py-2 text-xs font-semibold text-white shadow-sm transition-transform hover:scale-[1.02]"
+                    >
+                      去充值能量
+                    </Link>
+                  )}
+                </div>
               </div>
             )}
             {messages.map((m) => {
@@ -1206,6 +1259,9 @@ function ChatContentInner({ urlId, isNewChatRequested, demoCaseId }: ChatContent
         }}
         onAuthSuccess={() => {
           setShowAuth(false);
+          setQuotaGate(null);
+          // 登录后立即刷新请求头，后续对话按登录用户扣能量
+          void authHeaders().then(setChatHeaders);
           if (pendingAction === 'new_chat') {
             void handleNewChat();
           } else if (pendingAction === 'report') {

@@ -3,6 +3,8 @@ import { requireAdmin } from '@/lib/admin-auth';
 import { isAllowedOrigin } from '@/lib/request-security';
 import { getAiUsageAdminStats, type AiUsageAdminStats } from '@/lib/token-usage';
 import { computeRealityPathStats } from '@/lib/path-analytics';
+import { normalizeCityName } from '@/lib/analytics-normalize';
+import { isInternalAnalyticsEvent } from '@/lib/analytics-internal';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -137,7 +139,9 @@ function getVisitorKey(event: EventRow) {
 }
 
 function getTextValue(value: unknown, fallback = 'unknown') {
-  return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+  return typeof value === 'string' && value.trim()
+    ? value.trim().replace(/\s+/g, ' ')
+    : fallback;
 }
 
 function addCount(map: Map<string, number>, key: string, amount = 1) {
@@ -146,7 +150,7 @@ function addCount(map: Map<string, number>, key: string, amount = 1) {
 
 function mapToRank(map: Map<string, number>, limit = 20) {
   return Array.from(map.entries())
-    .sort((a, b) => b[1] - a[1])
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh-Hans-CN'))
     .slice(0, limit)
     .map(([name, count]) => ({ name, count }));
 }
@@ -230,9 +234,9 @@ export async function GET(req: Request) {
     const eventsError = eventsResult.error;
     if (eventsError && !isSetupSchemaError(eventsError)) throw eventsError;
     const allEvents = (eventsResult.error ? [] : eventsResult.data || []) as EventRow[];
-    const events = siteScope === 'production'
+    const events = (siteScope === 'production'
       ? allEvents.filter(isProductionSiteEvent)
-      : allEvents;
+      : allEvents).filter((event) => !isInternalAnalyticsEvent(event));
     const visitMap = new Map<string, number>();
     const registrationMap = new Map<string, number>();
     const dailyVisitorMap = new Map<string, Set<string>>();
@@ -277,7 +281,7 @@ export async function GET(req: Request) {
       if (e.event_name === 'page_view') {
         visitMap.set(d, (visitMap.get(d) || 0) + 1);
         addCount(sourceMap, getTextValue(e.metadata?.trafficSource, 'direct'));
-        addCount(cityMap, getTextValue(e.metadata?.city, '未知城市'));
+        addCount(cityMap, normalizeCityName(e.metadata?.city));
         addCount(featureMap, getTextValue(e.metadata?.feature, 'general'));
         const visitorKey = getVisitorKey(e);
         if (visitorKey) {

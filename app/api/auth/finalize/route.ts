@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getSupabaseAdminClient } from '@/lib/admin-auth';
+import { getSupabaseAdminClient, isAdminEmail } from '@/lib/admin-auth';
+import { buildServerInternalMetadata, hasInternalDeviceCookie, type InternalAnalyticsReason } from '@/lib/analytics-internal';
 
 export const dynamic = 'force-dynamic';
 
@@ -87,17 +88,21 @@ export async function POST(request: Request) {
     }
 
     const profileWasCreated = !existing;
+    const internalReasons: InternalAnalyticsReason[] = [];
+    if (user.email && isAdminEmail(user.email)) internalReasons.push('admin_email');
+    if (hasInternalDeviceCookie(request.headers.get('cookie'))) internalReasons.push('internal_device');
+
     await supabaseAdmin.from('analytics_events').insert({
       user_id: user.id,
       event_name: 'auth_finalize',
       step: 'email_login',
       status: profileWasCreated ? 'registered' : 'logged_in',
-      metadata: {
+      metadata: buildServerInternalMetadata({
         emailDomain: user.email?.split('@')[1]?.toLowerCase() || null,
         termsAccepted: finalTermsAccepted,
         trainingConsent: finalTrainingConsent,
         draftClaimed: Boolean(draftToken),
-      },
+      }, internalReasons),
       user_agent: request.headers.get('user-agent') || null,
     });
 

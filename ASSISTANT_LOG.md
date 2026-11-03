@@ -1,5 +1,13 @@
 # AI 助手合作日志
 
+## 2026-11-03（发布 v4.5.9 · 周报结构重构与用户中心改版）
+
+- **周报/分析**：周报与 `/api/admin/insights` 统一城市解码与中文映射，城市访客数按访客去重；长文本按完整语义裁剪，并列排名稳定排序。
+- **内部流量**：新增 `lib/analytics-internal.ts`，管理员邮箱、内部设备 Cookie、访客白名单在服务端写入 `metadata.internal` / `internalReason`，周报与后台默认排除；新增 `/internal-flag?token=...` 页面用于标记内部设备。
+- **用户中心**：改为三层信息架构（身份 → 天赋/路径/能量 → 对话与报告）；支付未启用时能量/余额卡整卡隐藏、充值入口默认关闭，保留预留代码并标记。
+- **范围说明**：周报/分析 9 个文件、用户中心 4 个文件、`chat-content` 角标同步；支付页面、后台支付管理、邮件、数据库迁移与其它界面改版均不进入本次发布。
+- 验证：用户中心由独立会话完成 `tsc` 与浏览器实测；周报/insights 待发布前复验；未执行数据库迁移与真实邮件验证。
+
 ## 2026-10-21（现实路径教练 · 埋点接入后台看板与周报）
 
 - **埋点事件**：路径页与对话全链路写入 `analytics_events`——`path_opened`、`path_mainline_selected`、`path_mainline_blocked`（完成度不足被引导）、`path_step2_unlocked`、`path_step3_unlocked`、`path_evidence_confirmed`、`path_requirement_checked`、`path_willingness_selected`、`path_readiness_generated`、`path_micro_action_confirmed`、`path_share_card_generated` / `path_share_card_saved`；对话正文复用 `anonymous_chat_message`（page=/path，附 `anonymousConversationId`、step、testMode），后台「原始对话」可直接查看。
